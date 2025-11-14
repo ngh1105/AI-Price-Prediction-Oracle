@@ -37,6 +37,31 @@ export default function Page() {
     refetchInterval: 60_000,
   })
 
+  // Health check monitoring
+  const healthQuery = useQuery({
+    queryKey: ['health'],
+    queryFn: async () => {
+      const resp = await fetch('/api/health')
+      if (!resp.ok) {
+        throw new Error('Health check failed')
+      }
+      return resp.json()
+    },
+    refetchInterval: 30_000, // Check every 30 seconds
+    retry: 2,
+    retryDelay: 5000,
+  })
+
+  // Alert user if health check fails
+  useEffect(() => {
+    if (healthQuery.isError && !healthQuery.isFetching) {
+      toast.error('System health check failed. Some features may not work correctly.', {
+        duration: 10000,
+        id: 'health-check-error', // Prevent duplicate toasts
+      })
+    }
+  }, [healthQuery.isError, healthQuery.isFetching])
+
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('24h')
   const [activeTab, setActiveTab] = useState<'prediction' | 'history' | 'comparison' | 'timeframes'>('prediction')
