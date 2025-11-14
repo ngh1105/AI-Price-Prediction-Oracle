@@ -67,19 +67,44 @@ def list_registered_symbols(client, contract_address: str) -> List[str]:
     return _normalise_symbol_list(response)
 
 
-def submit_prediction_update(client, contract_address: str, symbol: str, context_json: str) -> Tuple[str, str]:
+def check_contract_health(client, contract_address: str) -> bool:
     """
-    Submit a prediction update transaction to the GenLayer contract.
+    Check if the contract is accessible and healthy.
+    
+    Args:
+        client: GenLayer client instance
+        contract_address: Contract address
+    
+    Returns:
+        True if contract is healthy, False otherwise
+    """
+    try:
+        symbols = list_registered_symbols(client, contract_address)
+        # Contract is healthy if we can read symbols (even if empty)
+        logger.debug(f"Contract health check passed: {len(symbols)} symbols found")
+        return True
+    except Exception as e:
+        logger.warning(f"Contract health check failed: {e}")
+        return False
+
+
+def submit_prediction_update(client, contract_address: str, symbol: str, context_json: str, timeframe: str = "24h", max_retries: int = 3) -> Tuple[str, str]:
+    """
+    Submit a prediction update transaction to the GenLayer contract with retry logic.
     
     Args:
         client: GenLayer client instance
         contract_address: Contract address
         symbol: Trading symbol (e.g., 'BTC', 'ETH')
         context_json: JSON string containing market context data
+        timeframe: Prediction timeframe ("1h", "4h", "12h", "24h", "7d", "30d")
+        max_retries: Maximum number of retry attempts (default: 3)
     
     Returns:
         Tuple of (transaction_hash, receipt_id)
     """
+    import time
+    
     # Validate and normalize JSON
     try:
         # Parse to ensure it's valid JSON
@@ -96,30 +121,62 @@ def submit_prediction_update(client, contract_address: str, symbol: str, context
     if not symbol_clean:
         raise ValueError("symbol cannot be empty")
     
-    logger.info(f"Submitting transaction: symbol={symbol_clean}, contract={contract_address}")
+    # Validate timeframe
+    valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+    timeframe_clean = timeframe.lower().strip()
+    if timeframe_clean not in valid_timeframes:
+        raise ValueError(f"invalid timeframe. Must be one of: {valid_timeframes}")
+    
+    logger.info(f"Submitting transaction: symbol={symbol_clean}, timeframe={timeframe_clean}, contract={contract_address}")
     logger.debug(f"Context JSON preview (first 200 chars): {normalized_json[:200]}...")
     
-    # Call contract method
-    try:
-        tx_hash = client.write_contract(
-            address=contract_address,
-            function_name='request_update',
-            args=[symbol_clean, normalized_json],
-        )
-        logger.info(f"Transaction submitted: {tx_hash}")
-    except Exception as e:
-        logger.error(f"Failed to submit transaction: {e}", exc_info=True)
-        raise
+    # Retry logic for transaction submission
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            # Call contract method
+            tx_hash = client.write_contract(
+                address=contract_address,
+                function_name='request_update',
+                args=[symbol_clean, normalized_json, timeframe_clean],
+            )
+            logger.info(f"Transaction submitted: {tx_hash} (attempt {attempt + 1}/{max_retries})")
+            
+            # Wait for transaction to be accepted (with increased timeout)
+            try:
+                receipt = client.wait_for_transaction_receipt(
+                    transaction_hash=tx_hash, 
+                    status=TransactionStatus.ACCEPTED,
+                    retries=20,  # 60 seconds total
+                    interval=3000  # 3 seconds between retries
+                )
+                receipt_id = receipt.id if hasattr(receipt, 'id') else ''
+                logger.info(f"Transaction accepted: {tx_hash}, receipt_id={receipt_id}")
+                return tx_hash, receipt_id  # type: ignore[attr-defined]
+            except Exception as e:
+                # Log warning but don't fail - transaction was submitted successfully
+                # It may still be processing on the network
+                logger.warning(f"Transaction submitted but not yet accepted: {tx_hash}")
+                logger.warning(f"Transaction may still be processing. Error: {e}")
+                # Return tx_hash anyway so scheduler can continue
+                return tx_hash, ''
+                
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries - 1:
+                # Exponential backoff: 5s, 10s, 20s
+                wait_time = 5 * (2 ** attempt)
+                logger.warning(f"Transaction submission failed (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.info(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Failed to submit transaction after {max_retries} attempts: {e}", exc_info=True)
+                raise
     
-    # Wait for transaction to be accepted
-    try:
-        receipt = client.wait_for_transaction_receipt(transaction_hash=tx_hash, status=TransactionStatus.ACCEPTED)
-        receipt_id = receipt.id if hasattr(receipt, 'id') else ''
-        logger.info(f"Transaction accepted: {tx_hash}, receipt_id={receipt_id}")
-        return tx_hash, receipt_id  # type: ignore[attr-defined]
-    except Exception as e:
-        logger.error(f"Failed to wait for transaction receipt: {e}", exc_info=True)
-        raise
+    # Should never reach here, but just in case
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("Transaction submission failed for unknown reason")
 
 
 def add_symbol(client, contract_address: str, symbol: str, description: str) -> Tuple[str, str]:
@@ -153,11 +210,17 @@ def add_symbol(client, contract_address: str, symbol: str, description: str) -> 
         raise
     
     try:
-        receipt = client.wait_for_transaction_receipt(transaction_hash=tx_hash, status=TransactionStatus.ACCEPTED)
+        receipt = client.wait_for_transaction_receipt(
+            transaction_hash=tx_hash, 
+            status=TransactionStatus.ACCEPTED,
+            retries=20,
+            interval=3000
+        )
         receipt_id = receipt.id if hasattr(receipt, 'id') else ''
         logger.info(f"Add symbol transaction accepted: {tx_hash}, receipt_id={receipt_id}")
         return tx_hash, receipt_id  # type: ignore[attr-defined]
     except Exception as e:
-        logger.error(f"Failed to wait for transaction receipt: {e}", exc_info=True)
-        raise
+        logger.warning(f"Add symbol transaction submitted but not yet accepted: {tx_hash}")
+        logger.warning(f"Transaction may still be processing. Error: {e}")
+        return tx_hash, ''
 

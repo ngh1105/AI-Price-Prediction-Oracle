@@ -5,15 +5,17 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useWalletClient } from 'wagmi'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast, Toaster } from 'sonner'
-import { fetchLatestPrediction, listSymbols, requestSymbolUpdate } from '@/lib/contract'
+import { fetchLatestPrediction, fetchLatestPredictionByTimeframe, listSymbols, requestSymbolUpdate, requestSymbolUpdateAllTimeframes, TIMEFRAMES, type Timeframe } from '@/lib/contract'
 import { PredictionCard, type Prediction } from './components/PredictionCard'
 import { SymbolManagerDialog } from './components/SymbolManagerDialog'
 import { PredictionCardSkeleton } from './components/SkeletonLoader'
 import { PriceChart } from './components/PriceChart'
 import { PredictionHistory } from './components/PredictionHistory'
 import { SymbolComparison } from './components/SymbolComparison'
+import { TimeframeSelector } from './components/TimeframeSelector'
+import { MultiTimeframeView } from './components/MultiTimeframeView'
 import { cn } from '@/lib/utils'
-import { TrendingUp, Sparkles, Activity, History, BarChart3 } from 'lucide-react'
+import { TrendingUp, Sparkles, Activity, History, BarChart3, Clock } from 'lucide-react'
 
 export default function Page() {
   const queryClient = useQueryClient()
@@ -35,8 +37,50 @@ export default function Page() {
     refetchInterval: 60_000,
   })
 
+  // Health check monitoring
+  const healthQuery = useQuery({
+    queryKey: ['health'],
+    queryFn: async () => {
+      const resp = await fetch('/api/health')
+      const data = await resp.json()
+      if (!resp.ok) {
+        // Include error data in the thrown error
+        const error = new Error(data.error || 'Health check failed') as any
+        error.response = { data }
+        throw error
+      }
+      return data
+    },
+    refetchInterval: 30_000, // Check every 30 seconds
+    retry: 2,
+    retryDelay: 5000,
+    // Don't show error toast on initial load if wallet not connected
+    retryOnMount: false,
+  })
+
+  // Alert user if health check fails
+  useEffect(() => {
+    if (healthQuery.isError && !healthQuery.isFetching) {
+      const errorData = healthQuery.error as any
+      const errorMessage = errorData?.response?.data?.error || errorData?.message || 'System health check failed'
+      const suggestion = errorData?.response?.data?.suggestion || ''
+      
+      toast.error(
+        <div>
+          <div className="font-semibold">{errorMessage}</div>
+          {suggestion && <div className="text-sm mt-1 opacity-90">{suggestion}</div>}
+        </div>,
+        {
+          duration: 15000,
+          id: 'health-check-error', // Prevent duplicate toasts
+        }
+      )
+    }
+  }, [healthQuery.isError, healthQuery.isFetching, healthQuery.error])
+
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'prediction' | 'history' | 'comparison'>('prediction')
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('24h')
+  const [activeTab, setActiveTab] = useState<'prediction' | 'history' | 'comparison' | 'timeframes'>('prediction')
 
   useEffect(() => {
     if (!selectedSymbol && symbolsQuery.data && symbolsQuery.data.length > 0) {
@@ -45,11 +89,14 @@ export default function Page() {
   }, [symbolsQuery.data, selectedSymbol])
 
   const predictionQuery = useQuery({
-    queryKey: ['prediction', selectedSymbol],
+    queryKey: ['prediction', selectedSymbol, selectedTimeframe],
     queryFn: async () => {
       if (!selectedSymbol) return null
       try {
-        const latest = await fetchLatestPrediction(selectedSymbol)
+        // Use timeframe-specific fetch if not 24h, otherwise use legacy method for backward compat
+        const latest = selectedTimeframe === '24h' 
+          ? await fetchLatestPrediction(selectedSymbol)
+          : await fetchLatestPredictionByTimeframe(selectedSymbol, selectedTimeframe)
         if (!latest) return null
         
         // Parse key_events and sources from JSON strings
@@ -77,6 +124,7 @@ export default function Page() {
         
         const result = {
           ...latest,
+          timeframe: latest?.timeframe || selectedTimeframe, // Include timeframe
           key_events: keyEvents,
           sources: sources,
           raw_context: latest?.raw_context as string | undefined,
@@ -142,16 +190,47 @@ export default function Page() {
 
       const parsed = JSON.parse(contextJson)
       const minified = JSON.stringify(parsed)
-      await requestSymbolUpdate(address, { symbol: selectedSymbol, contextJson: minified }, provider)
+      
+      toast.info(`Submitting predictions for ${selectedSymbol}...`, { duration: 2000 })
+      
+      // Submit for ALL timeframes automatically
+      const results = await requestSymbolUpdateAllTimeframes(address, { 
+        symbol: selectedSymbol, 
+        contextJson: minified 
+      }, provider)
+      
+      // Count successes
+      const successCount = results.filter(r => r.success).length
+      const failedCount = results.filter(r => !r.success).length
+      
+      if (successCount > 0) {
+        return { successCount, failedCount, results }
+      } else {
+        // Show detailed error if all failed
+        const errors = results.filter(r => !r.success).map(r => `${r.timeframe}: ${r.error}`).join(', ')
+        throw new Error(`Failed to submit any predictions. Errors: ${errors}`)
+      }
     },
-    onSuccess: () => {
-      toast.success('Prediction update submitted. Validators will finalise shortly.')
-      queryClient.invalidateQueries({ queryKey: ['prediction', selectedSymbol] })
+    onSuccess: (data) => {
+      if (data.failedCount > 0) {
+        toast.warning(`Predictions submitted for ${data.successCount}/6 timeframes. ${data.failedCount} failed.`, {
+          duration: 5000,
+        })
+      } else {
+        toast.success(`✅ Predictions submitted for all ${data.successCount} timeframes!`, {
+          duration: 3000,
+        })
+      }
+      // Invalidate all prediction queries
+      queryClient.invalidateQueries({ queryKey: ['prediction'] })
+      queryClient.invalidateQueries({ queryKey: ['all-timeframe-predictions', selectedSymbol] })
       generateContext.reset()
     },
     onError: (error: any) => {
-      console.error(error)
-      toast.error(error?.message ?? 'Failed to submit update')
+      console.error('[requestUpdate] Error:', error)
+      toast.error(error?.message ?? 'Failed to submit predictions', {
+        duration: 8000,
+      })
     },
   })
 
@@ -276,12 +355,38 @@ export default function Page() {
                 <BarChart3 className="h-3.5 w-3.5" />
                 Compare
               </button>
+              <button
+                onClick={() => setActiveTab('timeframes')}
+                disabled={!selectedSymbol}
+                className={cn(
+                  "px-4 py-2 text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5",
+                  activeTab === 'timeframes'
+                    ? "border-accent text-accent"
+                    : "border-transparent text-muted hover:text-foreground",
+                  !selectedSymbol && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                Timeframes
+              </button>
             </div>
 
             {/* Tab Content */}
             <div>
               {activeTab === 'prediction' && (
                 <>
+                  {selectedSymbol && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-semibold text-muted uppercase tracking-wider">Select Timeframe</span>
+                      </div>
+                      <TimeframeSelector 
+                        selected={selectedTimeframe} 
+                        onSelect={setSelectedTimeframe}
+                      />
+                    </div>
+                  )}
                   {predictionQuery.isLoading && <PredictionCardSkeleton />}
                   {predictionQuery.data && (
                     <div className="space-y-4">
@@ -358,6 +463,19 @@ export default function Page() {
               {activeTab === 'comparison' && (
                 <SymbolComparison />
               )}
+
+              {activeTab === 'timeframes' && (
+                selectedSymbol ? (
+                  <MultiTimeframeView symbol={selectedSymbol} />
+                ) : (
+                  <div className="border border-sky-500/40 bg-gradient-to-br from-sky-500/10 to-sky-500/5 backdrop-blur-sm text-sky-100 rounded-2xl px-6 py-5 shadow-lg shadow-sky-500/10">
+                    <p className="font-semibold text-base">Select a symbol to view multi-timeframe predictions</p>
+                    <p className="text-sky-200/70 mt-2 text-sm leading-relaxed">
+                      Choose a symbol from the list above to see predictions across all timeframes (1h, 4h, 12h, 24h, 7d, 30d).
+                    </p>
+                  </div>
+                )
+              )}
             </div>
           </div>
 
@@ -381,7 +499,7 @@ export default function Page() {
                   Generate Prediction
                 </h3>
                 <p className="text-sm text-muted leading-relaxed">
-                  Automatically generate a price prediction for the selected symbol. The system will fetch current market data, technical indicators, and news to create a comprehensive analysis.
+                  Automatically generate price predictions for all timeframes (1h, 4h, 12h, 24h, 7d, 30d) for the selected symbol. The system will fetch current market data, technical indicators, and news to create comprehensive analyses.
                 </p>
               </div>
 
@@ -405,10 +523,10 @@ export default function Page() {
                     {generateContext.isPending
                       ? 'Generating context...'
                       : requestUpdate.isPending
-                      ? 'Submitting prediction...'
+                      ? 'Submitting predictions for all timeframes...'
                       : !address
                       ? 'Connect wallet to generate'
-                      : 'Generate & Submit Prediction'}
+                      : 'Generate & Submit All Timeframes'}
                   </button>
 
                   {generateContext.isError && (

@@ -5,10 +5,12 @@ import { BadgeDollarSign, Sparkle, TrendingUp, TrendingDown, Target, Clock } fro
 import classNames from 'classnames'
 import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
+import { TIMEFRAME_LABELS } from '@/lib/contract'
 
 export type Prediction = {
   prediction_id: string
   symbol: string
+  timeframe?: string  // "1h", "4h", "12h", "24h", "7d", "30d"
   generated_at: number
   predicted_price: string
   outlook: string
@@ -106,11 +108,22 @@ export function PredictionCard({ prediction }: { prediction: Prediction }) {
       
       <div className="flex items-start justify-between gap-6 relative z-10">
         <div className="flex-1 space-y-4">
-          <div className="flex items-center gap-2 text-sm uppercase tracking-wide text-muted">
-            <div className="p-1.5 rounded-lg bg-accent/10 border border-accent/20">
-              <BadgeDollarSign className="h-3.5 w-3.5 text-accent" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm uppercase tracking-wide text-muted">
+              <div className="p-1.5 rounded-lg bg-accent/10 border border-accent/20">
+                <BadgeDollarSign className="h-3.5 w-3.5 text-accent" />
+              </div>
+              <span className="font-semibold">{prediction.symbol}</span>
             </div>
-            <span className="font-semibold">{prediction.symbol}</span>
+            {/* Timeframe Badge */}
+            {prediction.timeframe && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card/60 border border-card-border/40">
+                <Clock className="h-3 w-3 text-muted-foreground" />
+                <span className="text-xs font-medium text-muted-foreground">
+                  {TIMEFRAME_LABELS[prediction.timeframe as keyof typeof TIMEFRAME_LABELS] || prediction.timeframe}
+                </span>
+              </div>
+            )}
           </div>
           
           {/* Price Comparison Section */}

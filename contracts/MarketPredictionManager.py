@@ -19,6 +19,7 @@ class SymbolConfig:
 class PredictionRecord:
     prediction_id: str
     symbol: str
+    timeframe: str  # "1h", "4h", "12h", "24h", "7d", "30d"
     counter: u64
     predicted_price: str
     outlook: str
@@ -32,8 +33,11 @@ class PredictionRecord:
 
 class MarketPredictionManager(gl.Contract):
     symbols: TreeMap[str, SymbolConfig]
-    symbol_counters: TreeMap[str, u64]
-    symbol_latest_prediction: TreeMap[str, str]
+    symbol_counters: TreeMap[str, u64]  # Legacy: for backward compatibility (24h only)
+    symbol_latest_prediction: TreeMap[str, str]  # Legacy: for backward compatibility (24h only)
+    # New: timeframe-specific storage
+    symbol_timeframe_counters: TreeMap[str, u64]  # Key: "SYMBOL-TIMEFRAME"
+    symbol_timeframe_latest: TreeMap[str, str]  # Key: "SYMBOL-TIMEFRAME", Value: prediction_id
     predictions: TreeMap[str, PredictionRecord]
     max_history: u32
 
@@ -41,6 +45,26 @@ class MarketPredictionManager(gl.Contract):
         if default_history_window <= 0:
             default_history_window = 168
         self.max_history = u32(default_history_window)
+        self._initialise_timeframe_state()
+
+    def _initialise_timeframe_state(self) -> None:
+        """
+        Migration helper to seed timeframe-specific storage from legacy 24h data.
+        """
+        try:
+            for symbol in self.symbols:
+                legacy_counter = self.symbol_counters.get(symbol)
+                if legacy_counter is None:
+                    continue
+                tf_key = f"{symbol}-24h"
+                if self.symbol_timeframe_counters.get(tf_key) is None:
+                    self.symbol_timeframe_counters[tf_key] = legacy_counter
+                legacy_latest = self.symbol_latest_prediction.get(symbol)
+                if legacy_latest is not None and self.symbol_timeframe_latest.get(tf_key) is None:
+                    self.symbol_timeframe_latest[tf_key] = legacy_latest
+        except Exception:
+            # Best-effort migration; ignore errors to avoid reverting contract init
+            pass
 
     @gl.public.write
     def add_symbol(self, symbol: str, description: str) -> None:
@@ -69,46 +93,97 @@ class MarketPredictionManager(gl.Contract):
         self.max_history = u32(history_window)
 
     @gl.public.write
-    def request_update(self, symbol: str, context_json: str) -> str:
+    def request_update(self, symbol: str, context_json: str, timeframe: str = "24h") -> str:
         key = symbol.upper().strip()
         if key not in self.symbols:
             raise ValueError("symbol not registered")
         if len(context_json.strip()) == 0:
             raise ValueError("context_json required")
 
+        # Validate timeframe
+        tf = timeframe.lower().strip()
+        valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+        if tf not in valid_timeframes:
+            raise ValueError(f"invalid timeframe. Must be one of: {valid_timeframes}")
+
         config = self.symbols[key]
         if not config.is_active:
             raise ValueError("symbol inactive")
 
-        payload = self._execute_prediction(key, context_json)
+        payload = self._execute_prediction(key, tf, context_json)
 
-        counter = int(self.symbol_counters.get(key, u64(0)))
+        tf_key = f"{key}-{tf}"
+
+        if tf == "24h":
+            counter = int(self.symbol_counters.get(key, u64(0)))
+            # Keep timeframe counter in sync but do not treat it as source of truth
+            if self.symbol_timeframe_counters.get(tf_key) is None:
+                self.symbol_timeframe_counters[tf_key] = u64(counter)
+        else:
+            counter = int(self.symbol_timeframe_counters.get(tf_key, u64(0)))
+
         next_counter = counter + 1
-        prediction_id = f"{key}-{next_counter}"
+        prediction_id = f"{key}-{tf}-{next_counter}"
 
         record = self._build_record(
             prediction_id=prediction_id,
             symbol=key,
+            timeframe=tf,
             counter=u64(next_counter),
             payload=payload,
             context_json=context_json,
         )
 
+        # Store in timeframe-specific storage
         self.predictions[prediction_id] = record
-        self.symbol_counters[key] = u64(next_counter)
-        self.symbol_latest_prediction[key] = prediction_id
+        self.symbol_timeframe_latest[tf_key] = prediction_id
 
+        if tf == "24h":
+            self.symbol_counters[key] = u64(next_counter)
+            self.symbol_latest_prediction[key] = prediction_id
+            self.symbol_timeframe_counters[tf_key] = u64(next_counter)
+        else:
+            self.symbol_timeframe_counters[tf_key] = u64(next_counter)
+
+        # History trimming per timeframe
         max_keep = int(self.max_history)
         if max_keep > 0 and next_counter > max_keep:
             remove_index = next_counter - max_keep
-            remove_id = f"{key}-{remove_index}"
-            if remove_id in self.predictions:
-                del self.predictions[remove_id]
+            if tf == "24h":
+                remove_id_new = f"{key}-24h-{remove_index}"
+                self._delete_prediction_if_exists(remove_id_new)
+                legacy_id = f"{key}-{remove_index}"
+                self._delete_prediction_if_exists(legacy_id)
+            else:
+                remove_id = f"{key}-{tf}-{remove_index}"
+                self._delete_prediction_if_exists(remove_id)
 
         return prediction_id
 
-    def _execute_prediction(self, symbol: str, context_json: str) -> typing.Dict[str, typing.Any]:
-        task = f"""You are an expert market analyst combining technical analysis with fundamental market factors. Use the supplied JSON context to forecast the price of {symbol} 24 hours from now.
+    def _execute_prediction(self, symbol: str, timeframe: str, context_json: str) -> typing.Dict[str, typing.Any]:
+        # Map timeframe to human-readable duration
+        timeframe_map = {
+            "1h": "1 hour",
+            "4h": "4 hours",
+            "12h": "12 hours",
+            "24h": "24 hours",
+            "7d": "7 days",
+            "30d": "30 days"
+        }
+        duration = timeframe_map.get(timeframe, "24 hours")
+        
+        # Adjust analysis focus based on timeframe
+        if timeframe in ["1h", "4h"]:
+            timeframe_guidance = "For this short-term timeframe, focus primarily on technical indicators, momentum, order flow, and immediate market sentiment. Short-term price movements are more influenced by technical patterns, support/resistance levels, and intraday trading activity."
+        elif timeframe in ["12h", "24h"]:
+            timeframe_guidance = "For this medium-term timeframe, balance technical analysis with fundamental factors. Consider both short-term momentum and emerging market trends, news events, and sentiment shifts that could impact price within this window."
+        else:  # 7d, 30d
+            timeframe_guidance = "For this longer-term timeframe, emphasize fundamental analysis, macroeconomic trends, structural market changes, and major news events. Technical indicators are less reliable over longer periods, so focus on broader market dynamics, adoption trends, and fundamental catalysts."
+        
+        task = f"""You are an expert market analyst combining technical analysis with fundamental market factors. Use the supplied JSON context to forecast the price of {symbol} {duration} from now.
+
+TIMEFRAME GUIDANCE:
+{timeframe_guidance}
 
 ANALYSIS REQUIREMENTS:
 1. TECHNICAL ANALYSIS: If technical_indicators are provided, analyze RSI, MACD, Moving Averages, Support/Resistance levels, price patterns, and trend direction to identify momentum and potential reversal signals.
@@ -126,6 +201,7 @@ Return ONLY valid JSON with the following keys:
   * Market trends and price action interpretation
   * Fundamental factors (news impact, sentiment, macro trends)
   * How technical signals align or conflict with market news and trends
+  * Timeframe-specific considerations (why this prediction is appropriate for {duration})
 - key_events: array of up to 5 short strings describing major drivers (include both technical signals like "RSI oversold", "MACD bullish crossover" AND market events/news)
 - sources: array of up to 5 human-readable references (URLs or descriptors)
 Do not include markdown. JSON must be minified."""
@@ -202,6 +278,7 @@ sources should cite URLs or clear identifiers.
         self,
         prediction_id: str,
         symbol: str,
+        timeframe: str,
         counter: u64,
         payload: typing.Dict[str, typing.Any],
         context_json: str,
@@ -246,6 +323,7 @@ sources should cite URLs or clear identifiers.
         return PredictionRecord(
             prediction_id=prediction_id,
             symbol=symbol,
+            timeframe=timeframe,
             counter=counter,
             predicted_price=predicted_price,
             outlook=outlook,
@@ -310,8 +388,11 @@ sources should cite URLs or clear identifiers.
         collected = 0
 
         while current >= 1 and collected < max_entries:
-            prediction_id = f"{key}-{current}"
+            prediction_id = f"{key}-24h-{current}"
             record = self.predictions.get(prediction_id)
+            if record is None:
+                legacy_id = f"{key}-{current}"
+                record = self.predictions.get(legacy_id)
             if record is not None:
                 history.append(self._record_to_map(record))
                 collected += 1
@@ -319,10 +400,48 @@ sources should cite URLs or clear identifiers.
 
         return history
 
+    @gl.public.view
+    def get_latest_prediction_by_timeframe(self, symbol: str, timeframe: str) -> TreeMap[str, str]:
+        """Get latest prediction for a specific symbol and timeframe"""
+        key = symbol.upper().strip()
+        tf = timeframe.lower().strip()
+        
+        # Validate timeframe
+        valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+        if tf not in valid_timeframes:
+            raise ValueError(f"invalid timeframe. Must be one of: {valid_timeframes}")
+        
+        tf_key = f"{key}-{tf}"
+        prediction_id = self.symbol_timeframe_latest.get(tf_key)
+        if prediction_id is None:
+            raise ValueError(f"no predictions recorded for {symbol} {timeframe}")
+        
+        record = self.predictions.get(prediction_id)
+        if record is None:
+            raise ValueError("prediction missing")
+        return self._record_to_map(record)
+
+    @gl.public.view
+    def get_all_timeframe_predictions(self, symbol: str) -> TreeMap[str, TreeMap[str, str]]:
+        """Get latest prediction for all timeframes of a symbol"""
+        key = symbol.upper().strip()
+        result = gl.storage.inmem_allocate(TreeMap[str, TreeMap[str, str]])
+        
+        for tf in ["1h", "4h", "12h", "24h", "7d", "30d"]:
+            tf_key = f"{key}-{tf}"
+            prediction_id = self.symbol_timeframe_latest.get(tf_key)
+            if prediction_id:
+                record = self.predictions.get(prediction_id)
+                if record:
+                    result[tf] = self._record_to_map(record)
+        
+        return result
+
     def _record_to_map(self, record: PredictionRecord) -> TreeMap[str, str]:
         data = gl.storage.inmem_allocate(TreeMap[str, str])
         data["prediction_id"] = record.prediction_id
         data["symbol"] = record.symbol
+        data["timeframe"] = record.timeframe
         data["counter"] = str(int(record.counter))
         data["predicted_price"] = record.predicted_price
         data["outlook"] = record.outlook
@@ -333,4 +452,9 @@ sources should cite URLs or clear identifiers.
         data["sources_json"] = record.sources_json
         data["raw_context"] = record.raw_context
         return data
+
+    def _delete_prediction_if_exists(self, prediction_id: str) -> None:
+        record = self.predictions.get(prediction_id)
+        if record is not None:
+            del self.predictions[prediction_id]
 
