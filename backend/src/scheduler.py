@@ -62,6 +62,9 @@ def run_once():
     logging.warning('No symbols to update (contract has symbols but none match .env whitelist)')
     return
 
+  # Supported timeframes
+  TIMEFRAMES = ["1h", "4h", "12h", "24h", "7d", "30d"]
+
   for symbol in symbols_to_update:
     try:
       context = build_market_context(symbol)
@@ -76,15 +79,24 @@ def run_once():
       except:
         pass  # If context is not valid JSON, let contract handle it
       
-      logging.info('Submitting update for %s', symbol)
-      tx_hash, _ = submit_prediction_update(client, contract_address, symbol, context)
-      logging.info('Update submitted for %s (tx %s)', symbol, tx_hash)
+      # Generate predictions for ALL timeframes
+      for timeframe in TIMEFRAMES:
+        try:
+          logging.info('Submitting %s prediction for %s', timeframe, symbol)
+          tx_hash, _ = submit_prediction_update(client, contract_address, symbol, context, timeframe)
+          logging.info('Update submitted for %s %s (tx %s)', symbol, timeframe, tx_hash)
+          
+          # Small delay between timeframes to avoid rate limits
+          if timeframe != TIMEFRAMES[-1]:
+            time.sleep(2)  # 2 second delay between timeframes
+        except Exception as error:
+          logging.exception('Failed to submit %s prediction for %s: %s', timeframe, symbol, error)
       
       # Add delay between symbols to avoid rate limits
       if symbol != symbols_to_update[-1]:
         time.sleep(3)  # 3 second delay between symbols
     except Exception as error:
-      logging.exception('Failed to submit update for %s: %s', symbol, error)
+      logging.exception('Failed to process %s: %s', symbol, error)
 
 
 def main():

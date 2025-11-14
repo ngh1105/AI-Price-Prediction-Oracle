@@ -5,15 +5,17 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useWalletClient } from 'wagmi'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast, Toaster } from 'sonner'
-import { fetchLatestPrediction, listSymbols, requestSymbolUpdate } from '@/lib/contract'
+import { fetchLatestPrediction, fetchLatestPredictionByTimeframe, listSymbols, requestSymbolUpdate, TIMEFRAMES, type Timeframe } from '@/lib/contract'
 import { PredictionCard, type Prediction } from './components/PredictionCard'
 import { SymbolManagerDialog } from './components/SymbolManagerDialog'
 import { PredictionCardSkeleton } from './components/SkeletonLoader'
 import { PriceChart } from './components/PriceChart'
 import { PredictionHistory } from './components/PredictionHistory'
 import { SymbolComparison } from './components/SymbolComparison'
+import { TimeframeSelector } from './components/TimeframeSelector'
+import { MultiTimeframeView } from './components/MultiTimeframeView'
 import { cn } from '@/lib/utils'
-import { TrendingUp, Sparkles, Activity, History, BarChart3 } from 'lucide-react'
+import { TrendingUp, Sparkles, Activity, History, BarChart3, Clock } from 'lucide-react'
 
 export default function Page() {
   const queryClient = useQueryClient()
@@ -36,7 +38,8 @@ export default function Page() {
   })
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'prediction' | 'history' | 'comparison'>('prediction')
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('24h')
+  const [activeTab, setActiveTab] = useState<'prediction' | 'history' | 'comparison' | 'timeframes'>('prediction')
 
   useEffect(() => {
     if (!selectedSymbol && symbolsQuery.data && symbolsQuery.data.length > 0) {
@@ -45,11 +48,14 @@ export default function Page() {
   }, [symbolsQuery.data, selectedSymbol])
 
   const predictionQuery = useQuery({
-    queryKey: ['prediction', selectedSymbol],
+    queryKey: ['prediction', selectedSymbol, selectedTimeframe],
     queryFn: async () => {
       if (!selectedSymbol) return null
       try {
-        const latest = await fetchLatestPrediction(selectedSymbol)
+        // Use timeframe-specific fetch if not 24h, otherwise use legacy method for backward compat
+        const latest = selectedTimeframe === '24h' 
+          ? await fetchLatestPrediction(selectedSymbol)
+          : await fetchLatestPredictionByTimeframe(selectedSymbol, selectedTimeframe)
         if (!latest) return null
         
         // Parse key_events and sources from JSON strings
@@ -77,6 +83,7 @@ export default function Page() {
         
         const result = {
           ...latest,
+          timeframe: latest?.timeframe || selectedTimeframe, // Include timeframe
           key_events: keyEvents,
           sources: sources,
           raw_context: latest?.raw_context as string | undefined,
@@ -142,11 +149,12 @@ export default function Page() {
 
       const parsed = JSON.parse(contextJson)
       const minified = JSON.stringify(parsed)
-      await requestSymbolUpdate(address, { symbol: selectedSymbol, contextJson: minified }, provider)
+      await requestSymbolUpdate(address, { symbol: selectedSymbol, contextJson: minified, timeframe: selectedTimeframe }, provider)
     },
     onSuccess: () => {
       toast.success('Prediction update submitted. Validators will finalise shortly.')
-      queryClient.invalidateQueries({ queryKey: ['prediction', selectedSymbol] })
+      queryClient.invalidateQueries({ queryKey: ['prediction', selectedSymbol, selectedTimeframe] })
+      queryClient.invalidateQueries({ queryKey: ['all-timeframe-predictions', selectedSymbol] })
       generateContext.reset()
     },
     onError: (error: any) => {
@@ -276,12 +284,38 @@ export default function Page() {
                 <BarChart3 className="h-3.5 w-3.5" />
                 Compare
               </button>
+              <button
+                onClick={() => setActiveTab('timeframes')}
+                disabled={!selectedSymbol}
+                className={cn(
+                  "px-4 py-2 text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5",
+                  activeTab === 'timeframes'
+                    ? "border-accent text-accent"
+                    : "border-transparent text-muted hover:text-foreground",
+                  !selectedSymbol && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                Timeframes
+              </button>
             </div>
 
             {/* Tab Content */}
             <div>
               {activeTab === 'prediction' && (
                 <>
+                  {selectedSymbol && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-semibold text-muted uppercase tracking-wider">Select Timeframe</span>
+                      </div>
+                      <TimeframeSelector 
+                        selected={selectedTimeframe} 
+                        onSelect={setSelectedTimeframe}
+                      />
+                    </div>
+                  )}
                   {predictionQuery.isLoading && <PredictionCardSkeleton />}
                   {predictionQuery.data && (
                     <div className="space-y-4">
@@ -357,6 +391,19 @@ export default function Page() {
 
               {activeTab === 'comparison' && (
                 <SymbolComparison />
+              )}
+
+              {activeTab === 'timeframes' && (
+                selectedSymbol ? (
+                  <MultiTimeframeView symbol={selectedSymbol} />
+                ) : (
+                  <div className="border border-sky-500/40 bg-gradient-to-br from-sky-500/10 to-sky-500/5 backdrop-blur-sm text-sky-100 rounded-2xl px-6 py-5 shadow-lg shadow-sky-500/10">
+                    <p className="font-semibold text-base">Select a symbol to view multi-timeframe predictions</p>
+                    <p className="text-sky-200/70 mt-2 text-sm leading-relaxed">
+                      Choose a symbol from the list above to see predictions across all timeframes (1h, 4h, 12h, 24h, 7d, 30d).
+                    </p>
+                  </div>
+                )
               )}
             </div>
           </div>

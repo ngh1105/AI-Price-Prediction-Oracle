@@ -102,10 +102,59 @@ export async function addSymbol(
 
 export async function requestSymbolUpdate(
   account: Account | Address | undefined,
-  { symbol, contextJson }: { symbol: string; contextJson: string },
+  { symbol, contextJson, timeframe = '24h' }: { symbol: string; contextJson: string; timeframe?: string },
   provider?: any
 ) {
-  const tx = await writeContract(account, 'request_update', [symbol, contextJson], 0n, provider)
+  const tx = await writeContract(account, 'request_update', [symbol, contextJson, timeframe], 0n, provider)
   return waitForTransactionReceipt(tx, 'ACCEPTED')
+}
+
+// Timeframe constants
+export const TIMEFRAMES = ['1h', '4h', '12h', '24h', '7d', '30d'] as const
+export type Timeframe = typeof TIMEFRAMES[number]
+
+// Timeframe display labels
+export const TIMEFRAME_LABELS: Record<Timeframe, string> = {
+  '1h': '1 Hour',
+  '4h': '4 Hours',
+  '12h': '12 Hours',
+  '24h': '24 Hours',
+  '7d': '7 Days',
+  '30d': '30 Days',
+}
+
+// Fetch latest prediction by timeframe
+export async function fetchLatestPredictionByTimeframe(symbol: string, timeframe: string) {
+  try {
+    const response = await readContract('get_latest_prediction_by_timeframe', [symbol, timeframe])
+    console.log(`[fetchLatestPredictionByTimeframe] ${symbol} ${timeframe}:`, response)
+    return response
+  } catch (error: any) {
+    console.error(`[fetchLatestPredictionByTimeframe] Error for ${symbol} ${timeframe}:`, error)
+    throw error
+  }
+}
+
+// Fetch all timeframe predictions for a symbol
+export async function fetchAllTimeframePredictions(symbol: string) {
+  try {
+    const response = await readContract('get_all_timeframe_predictions', [symbol])
+    console.log(`[fetchAllTimeframePredictions] ${symbol}:`, response)
+    
+    // Convert TreeMap to object
+    if (response && typeof response === 'object') {
+      const result: Record<string, any> = {}
+      for (const tf of TIMEFRAMES) {
+        if (response[tf]) {
+          result[tf] = response[tf]
+        }
+      }
+      return result
+    }
+    return {}
+  } catch (error: any) {
+    console.error(`[fetchAllTimeframePredictions] Error for ${symbol}:`, error)
+    return {}
+  }
 }
 

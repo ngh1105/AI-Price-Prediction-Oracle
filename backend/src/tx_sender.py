@@ -67,7 +67,7 @@ def list_registered_symbols(client, contract_address: str) -> List[str]:
     return _normalise_symbol_list(response)
 
 
-def submit_prediction_update(client, contract_address: str, symbol: str, context_json: str) -> Tuple[str, str]:
+def submit_prediction_update(client, contract_address: str, symbol: str, context_json: str, timeframe: str = "24h") -> Tuple[str, str]:
     """
     Submit a prediction update transaction to the GenLayer contract.
     
@@ -76,6 +76,7 @@ def submit_prediction_update(client, contract_address: str, symbol: str, context
         contract_address: Contract address
         symbol: Trading symbol (e.g., 'BTC', 'ETH')
         context_json: JSON string containing market context data
+        timeframe: Prediction timeframe ("1h", "4h", "12h", "24h", "7d", "30d")
     
     Returns:
         Tuple of (transaction_hash, receipt_id)
@@ -96,7 +97,13 @@ def submit_prediction_update(client, contract_address: str, symbol: str, context
     if not symbol_clean:
         raise ValueError("symbol cannot be empty")
     
-    logger.info(f"Submitting transaction: symbol={symbol_clean}, contract={contract_address}")
+    # Validate timeframe
+    valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+    timeframe_clean = timeframe.lower().strip()
+    if timeframe_clean not in valid_timeframes:
+        raise ValueError(f"invalid timeframe. Must be one of: {valid_timeframes}")
+    
+    logger.info(f"Submitting transaction: symbol={symbol_clean}, timeframe={timeframe_clean}, contract={contract_address}")
     logger.debug(f"Context JSON preview (first 200 chars): {normalized_json[:200]}...")
     
     # Call contract method
@@ -104,7 +111,7 @@ def submit_prediction_update(client, contract_address: str, symbol: str, context
         tx_hash = client.write_contract(
             address=contract_address,
             function_name='request_update',
-            args=[symbol_clean, normalized_json],
+            args=[symbol_clean, normalized_json, timeframe_clean],
         )
         logger.info(f"Transaction submitted: {tx_hash}")
     except Exception as e:
