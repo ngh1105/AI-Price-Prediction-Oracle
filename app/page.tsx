@@ -191,6 +191,8 @@ export default function Page() {
       const parsed = JSON.parse(contextJson)
       const minified = JSON.stringify(parsed)
       
+      toast.info(`Submitting predictions for ${selectedSymbol}...`, { duration: 2000 })
+      
       // Submit for ALL timeframes automatically
       const results = await requestSymbolUpdateAllTimeframes(address, { 
         symbol: selectedSymbol, 
@@ -204,14 +206,20 @@ export default function Page() {
       if (successCount > 0) {
         return { successCount, failedCount, results }
       } else {
-        throw new Error('Failed to submit any predictions')
+        // Show detailed error if all failed
+        const errors = results.filter(r => !r.success).map(r => `${r.timeframe}: ${r.error}`).join(', ')
+        throw new Error(`Failed to submit any predictions. Errors: ${errors}`)
       }
     },
     onSuccess: (data) => {
       if (data.failedCount > 0) {
-        toast.success(`Predictions submitted for ${data.successCount}/6 timeframes. ${data.failedCount} failed.`)
+        toast.warning(`Predictions submitted for ${data.successCount}/6 timeframes. ${data.failedCount} failed.`, {
+          duration: 5000,
+        })
       } else {
-        toast.success(`Predictions submitted for all ${data.successCount} timeframes!`)
+        toast.success(`✅ Predictions submitted for all ${data.successCount} timeframes!`, {
+          duration: 3000,
+        })
       }
       // Invalidate all prediction queries
       queryClient.invalidateQueries({ queryKey: ['prediction'] })
@@ -219,8 +227,10 @@ export default function Page() {
       generateContext.reset()
     },
     onError: (error: any) => {
-      console.error(error)
-      toast.error(error?.message ?? 'Failed to submit predictions')
+      console.error('[requestUpdate] Error:', error)
+      toast.error(error?.message ?? 'Failed to submit predictions', {
+        duration: 8000,
+      })
     },
   })
 

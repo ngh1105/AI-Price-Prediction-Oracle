@@ -24,11 +24,33 @@ export async function writeContract(
   value: bigint = 0n,
   provider?: any
 ) {
-  const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
-  attachSigner(provider, signer)
-  const client = getClient()
-  const address = getContractAddress()
-  return client.writeContract({ address, functionName, args, value })
+  try {
+    const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
+    if (!signer) {
+      throw new Error('No account/signer provided')
+    }
+    if (!provider) {
+      throw new Error('No provider provided. Please connect your wallet.')
+    }
+    
+    attachSigner(provider, signer)
+    const client = getClient()
+    const address = getContractAddress()
+    
+    console.log(`[writeContract] Submitting ${functionName} to ${address}`, {
+      functionName,
+      args: args.map((a, i) => i === 1 ? `${String(a).substring(0, 50)}...` : a), // Truncate contextJson
+      signer,
+    })
+    
+    const txHash = await client.writeContract({ address, functionName, args, value })
+    
+    console.log(`[writeContract] Transaction submitted: ${txHash}`)
+    return txHash
+  } catch (error: any) {
+    console.error(`[writeContract] Error submitting transaction:`, error)
+    throw error
+  }
 }
 
 export async function waitForTransactionReceipt(
@@ -157,33 +179,61 @@ export async function requestSymbolUpdateAllTimeframes(
   { symbol, contextJson }: { symbol: string; contextJson: string },
   provider?: any
 ): Promise<Array<{ timeframe: Timeframe; txHash: string; success: boolean; error?: string }>> {
-  const results: Array<{ timeframe: Timeframe; txHash: string; success: boolean; error?: string }> = []
+  console.log(`[requestSymbolUpdateAllTimeframes] Starting submission for ${symbol} across ${TIMEFRAMES.length} timeframes`)
   
-  // Submit for each timeframe sequentially
-  for (const timeframe of TIMEFRAMES) {
+  // Attach signer once before submitting all transactions
+  const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
+  if (!signer) {
+    throw new Error('No account/signer provided')
+  }
+  if (!provider) {
+    throw new Error('No provider provided. Please connect your wallet.')
+  }
+  
+  // Attach signer once for all transactions
+  attachSigner(provider, signer)
+  const client = getClient()
+  const address = getContractAddress()
+  
+  // Submit all timeframes in parallel for faster submission
+  // Each submission is independent, so we can do them concurrently
+  const submitPromises = TIMEFRAMES.map(async (timeframe): Promise<{ timeframe: Timeframe; txHash: string; success: boolean; error?: string }> => {
     try {
-      const tx = await writeContract(account, 'request_update', [symbol, contextJson, timeframe], 0n, provider)
-      // Don't wait for receipt - just submit and continue
-      // Transactions will be processed asynchronously
-      results.push({
+      console.log(`[requestSymbolUpdateAllTimeframes] Submitting ${timeframe} for ${symbol}...`)
+      const startTime = Date.now()
+      
+      // Use client directly instead of writeContract to avoid re-attaching signer
+      const tx = await client.writeContract({ 
+        address, 
+        functionName: 'request_update', 
+        args: [symbol, contextJson, timeframe], 
+        value: 0n 
+      })
+      
+      const elapsed = Date.now() - startTime
+      console.log(`[requestSymbolUpdateAllTimeframes] ${timeframe} submitted in ${elapsed}ms: ${tx}`)
+      
+      return {
         timeframe,
         txHash: tx,
         success: true,
-      })
-      
-      // Small delay between submissions to avoid rate limits
-      if (timeframe !== TIMEFRAMES[TIMEFRAMES.length - 1]) {
-        await new Promise(resolve => setTimeout(resolve, 1000)) // 1 second delay
       }
     } catch (error: any) {
-      results.push({
+      console.error(`[requestSymbolUpdateAllTimeframes] Failed to submit ${timeframe} for ${symbol}:`, error)
+      return {
         timeframe,
         txHash: '',
         success: false,
         error: error?.message || 'Unknown error',
-      })
+      }
     }
-  }
+  })
+  
+  // Wait for all submissions to complete
+  const results = await Promise.all(submitPromises)
+  
+  const successCount = results.filter(r => r.success).length
+  console.log(`[requestSymbolUpdateAllTimeframes] Completed: ${successCount}/${TIMEFRAMES.length} successful`)
   
   return results
 }
