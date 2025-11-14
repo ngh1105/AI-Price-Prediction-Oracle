@@ -1,7 +1,7 @@
 import type { Account, Address, CalldataEncodable } from 'genlayer-js/types'
 import { attachSigner, getClient } from './glClient'
 
-const FALLBACK_ADDRESS = '0x1111111111111111111111111111111111111111' as Address
+export const FALLBACK_ADDRESS = '0x1111111111111111111111111111111111111111' as Address
 
 export function getContractAddress(): Address {
   const fromEnv = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS

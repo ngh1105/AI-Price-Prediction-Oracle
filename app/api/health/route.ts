@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getClient, getContractAddress } from '@/lib/glClient'
-import { readContract } from '@/lib/contract'
+import { readContract, getContractAddress, FALLBACK_ADDRESS } from '@/lib/contract'
 
 export async function GET() {
   try {
     const contractAddress = getContractAddress()
     
     // Check if contract address is valid
-    if (!contractAddress || contractAddress === '0x1111111111111111111111111111111111111111') {
+    if (!contractAddress || contractAddress === FALLBACK_ADDRESS) {
       return NextResponse.json(
         { 
           status: 'unhealthy', 
