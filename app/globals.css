@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 225 15% 8%;
+  --fg: 210 22% 96%;
+  --fg-muted: 210 10% 75%;
+  --accent: 162 84% 50%;
+  --card-bg: 225 14% 12%;
+  --card-border: 210 14% 20%;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: 210 33% 98%;
+    --fg: 230 14% 12%;
+    --fg-muted: 230 10% 45%;
+    --accent: 171 77% 42%;
+    --card-bg: 210 40% 99%;
+    --card-border: 210 25% 90%;
+  }
+}
+
+body {
+  background-color: hsl(var(--bg));
+  color: hsl(var(--fg));
+}
+
+.text-muted {
+  color: hsl(var(--fg-muted));
+}
+
+.bg-card {
+  background-color: hsl(var(--card-bg));
+}
+
+.border-card {
+  border-color: hsl(var(--card-border));
+}
+
+/* Glassmorphism effects */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Smooth animations */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 1000px 100%;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, hsl(var(--accent)), hsl(162 84% 65%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* RainbowKit custom styling */
+[data-rk] {
+  --rk-radii-connectButton: 0.75rem;
+  --rk-radii-actionButton: 0.75rem;
+  --rk-radii-modal: 1rem;
+}
+
+[data-rk] button {
+  transition: all 0.2s ease;
+}
+
+[data-rk] button:hover {
+  transform: translateY(-1px);
+}
+
+/* Custom ConnectButton styling */
+[data-rk] [data-testid="rk-connect-button"] {
+  background: hsl(var(--accent)) !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
+  border-radius: 0.75rem !important;
+  padding: 0.5rem 1rem !important;
+  border: none !important;
+}
+
+[data-rk] [data-testid="rk-connect-button"]:hover {
+  background: hsl(162 84% 45%) !important;
+  box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3) !important;
+}
+
+/* Account button styling */
+[data-rk] [data-testid="rk-account-button"] {
+  background: hsl(var(--card-bg)) !important;
+  border: 1px solid hsl(var(--card-border)) !important;
+  border-radius: 0.75rem !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+[data-rk] [data-testid="rk-account-button"]:hover {
+  background: hsl(var(--card-bg) / 0.9) !important;
+}
+
