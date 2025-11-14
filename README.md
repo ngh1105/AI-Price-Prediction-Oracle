@@ -1,123 +1,493 @@
 # AI Price Prediction Oracle
 
-## Overview
+<div align="center">
 
-AI Price Prediction Oracle is a GenLayer-powered application that produces 24-hour price forecasts (with reasoning) for any supported symbol.  
-The project bundles everything needed to deploy, operate, and visualise the oracle:
+![GenLayer](https://img.shields.io/badge/GenLayer-Intelligent%20Contract-blue)
+![Next.js](https://img.shields.io/badge/Next.js-15-black)
+![Python](https://img.shields.io/badge/Python-3.12+-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-- `contracts/` &mdash; GenLayer Intelligent Contract (`MarketPredictionManager.py`).
-- `app/` &mdash; Next.js dashboard for viewing forecasts and submitting update jobs.
-- `backend/` &mdash; Python automation skeleton using `genlayer-py` for scheduled updates.
+**AI-powered cryptocurrency price prediction oracle built on GenLayer**
 
-The contract accepts structured market context, executes a non-deterministic LLM analysis, and stores JSON-formatted predictions with confidence, outlook, supporting factors, and citation list. Clients can fetch the latest record or the full history per symbol.
+[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [Documentation](#-documentation)
 
-## Repository Layout
+</div>
+
+---
+
+## 📖 Overview
+
+AI Price Prediction Oracle is a decentralized prediction system that leverages **GenLayer's Intelligent Contracts** to provide AI-powered 24-hour price forecasts for cryptocurrencies. The system combines technical analysis, fundamental market data, and AI reasoning to generate accurate predictions with confidence scores and detailed explanations.
+
+### Key Highlights
+
+- 🤖 **AI-Powered Predictions**: Uses GenLayer's Equivalence Principle for non-deterministic LLM-based price forecasting
+- 📊 **Technical Analysis**: Integrates RSI, MACD, Moving Averages, Support/Resistance levels, and trend analysis
+- 📰 **Fundamental Analysis**: Incorporates market news, sentiment indicators, and macroeconomic trends
+- 🔄 **Auto-Updates**: Backend scheduler automatically updates predictions every 15 minutes
+- 🎯 **Multi-Symbol Support**: Track unlimited symbols with automatic symbol detection
+- 🎨 **Modern UI**: Glassmorphism design with real-time updates and interactive charts
+
+---
+
+## ✨ Features
+
+### Core Functionality
+- ✅ **Symbol Management**: Add and manage cryptocurrency symbols via frontend
+- ✅ **AI Predictions**: 24-hour price forecasts with confidence scores (0-100)
+- ✅ **Outlook Classification**: Bullish, Bearish, or Neutral market outlook
+- ✅ **Detailed Reasoning**: Comprehensive explanations combining technical and fundamental analysis
+- ✅ **Prediction History**: Timeline view of past predictions with accuracy tracking
+- ✅ **Price Charts**: Visual representation of current vs predicted prices
+- ✅ **Symbol Comparison**: Side-by-side comparison of multiple symbols
+
+### Technical Features
+- ✅ **Auto-Symbol Detection**: Automatically detects new symbols without backend code changes
+- ✅ **Multi-API Support**: Primary Binance API with CoinGecko fallback
+- ✅ **Rate Limit Handling**: Exponential backoff retry logic for API calls
+- ✅ **News Filtering**: Symbol-specific news headlines with intelligent filtering
+- ✅ **Real-time Updates**: Auto-refresh every 60 seconds on frontend
+- ✅ **Wallet Integration**: RainbowKit/Wagmi for seamless wallet connection
+
+### Data Sources
+- **Price Data**: Binance API (primary), CoinGecko (fallback)
+- **Technical Indicators**: RSI, MACD, MA7, MA20, Support/Resistance, Trend
+- **News Headlines**: CryptoCompare API with symbol-specific filtering
+- **Market Context**: Real-time price, 24h change, volume, and market trends
+
+---
+
+## 🏗️ Architecture
 
 ```
-ai-price-prediction/
-├─ contracts/
-│  └─ MarketPredictionManager.py
-├─ app/
-│  ├─ components/
-│  │  ├─ PredictionCard.tsx
-│  │  └─ SymbolManagerDialog.tsx
-│  ├─ client-providers.tsx
-│  ├─ globals.css
-│  ├─ layout.tsx
-│  └─ page.tsx
-├─ lib/
-│  ├─ contract.ts
-│  ├─ genlayer.ts
-│  └─ glClient.ts
-├─ backend/
-│  ├─ README.md
-│  ├─ requirements.txt
-│  └─ src/
-│     ├─ context_builder.py
-│     ├─ scheduler.py
-│     └─ tx_sender.py
-├─ public/
-│  └─ favicon.png
-├─ LICENSE
-├─ package.json
-├─ postcss.config.js
-├─ tailwind.config.ts
-├─ tsconfig.json
-├─ next.config.js
-├─ next-env.d.ts
-├─ global.d.ts
-└─ .gitignore
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend (Next.js)                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ Prediction   │  │   History    │  │  Comparison  │     │
+│  │    Card       │  │   Timeline    │  │    View      │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         Wallet Connection (RainbowKit/Wagmi)         │  │
+│  └──────────────────────────────────────────────────────┘  │
+└───────────────────────┬─────────────────────────────────────┘
+                         │
+                         │ genlayer-js
+                         │
+┌───────────────────────▼─────────────────────────────────────┐
+│         GenLayer Intelligent Contract                        │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │     MarketPredictionManager.py                         │  │
+│  │  • Symbol Registry                                     │  │
+│  │  • Prediction Storage                                  │  │
+│  │  • AI Analysis (Equivalence Principle)                │  │
+│  │  • History Management                                  │  │
+│  └──────────────────────────────────────────────────────┘  │
+└───────────────────────┬─────────────────────────────────────┘
+                         │
+                         │ genlayer-py
+                         │
+┌───────────────────────▼─────────────────────────────────────┐
+│              Backend Scheduler (Python)                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │   Context    │  │ Transaction  │  │  Scheduler   │      │
+│  │   Builder    │  │    Sender    │  │   (15 min)   │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│                                                               │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │  External APIs: Binance, CoinGecko, CryptoCompare     │ │
+│  └───────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-## Contract Highlights
+---
 
-- Maintains registry of supported symbols with configurable minimum update interval.
-- Stores history of prediction records per symbol (confidence, outlook, summary, reasoning, sources).
-- `request_update(symbol, context_json)` runs a non-deterministic routine that uses the Equivalence Principle to validate LLM output before persisting the latest prediction.
-- View methods expose symbol metadata, most recent prediction, or an arbitrary slice of history.
+## 🚀 Quick Start
 
-See `contracts/MarketPredictionManager.py` for the full implementation.
+### Prerequisites
 
-## Frontend (Next.js 15 + TailwindCSS)
+- **Node.js** 18+ and npm
+- **Python** 3.12+ (for backend)
+- **GenLayer Account** and API access
+- **Wallet** (MetaMask, WalletConnect, etc.)
 
-- Wallet connection via RainbowKit/Wagmi.
-- Real-time read from the contract using `genlayer-js`.
-- Pages/components:
-  - `page.tsx` renders the dashboard.
-  - `PredictionCard.tsx` shows a single prediction with reasoning.
-  - `SymbolManagerDialog.tsx` lets privileged users add new symbols.
-
-### Running locally
+### 1. Clone Repository
 
 ```bash
+git clone https://github.com/ngh1105/AI-Price-Prediction-Oracle.git
+cd AI-Price-Prediction-Oracle
+```
+
+### 2. Frontend Setup
+
+```bash
+# Install dependencies
 npm install
+
+# Create environment file
+cp .env.example .env.local
+
+# Edit .env.local with your configuration
+NEXT_PUBLIC_CONTRACT_ADDRESS=0xYourDeployedContract
+NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
+NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=your_wc_project_id
+
+# Run development server
 npm run dev
 ```
 
-Environment overrides (optional): create `.env.local` with
+Frontend will be available at `http://localhost:3000`
 
-```
-NEXT_PUBLIC_CONTRACT_ADDRESS=0xYourDeployedContract
-NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
-NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=your_wc_id
-```
-
-## Backend Automation (Python + genlayer-py)
-
-`backend/` contains an intentionally slim scaffold:
-
-1. `context_builder.py` – aggregates data feeds (price, news, sentiment) into JSON context handed to the contract.
-2. `tx_sender.py` – signs and submits `request_update` transactions with a local private key on **studionet**.
-3. `scheduler.py` – runs the loop (default every 15 minutes, configurable via `UPDATE_INTERVAL_SECONDS`).
-
-Install dependencies and run:
+### 3. Backend Setup
 
 ```bash
 cd backend
+
+# Create virtual environment
 python -m venv .venv
-. .venv/Scripts/activate  # or source .venv/bin/activate
+
+# Activate virtual environment
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Create environment file
+# Create .env file with:
+PRIVATE_KEY=0xYourPrivateKey
+CONTRACT_ADDRESS=0xYourDeployedContract
+GENLAYER_RPC_URL=https://studio.genlayer.com/api
+# Optional: Whitelist symbols (leave empty to update all symbols from contract)
+SYMBOLS=BTC,ETH,SOL
+UPDATE_INTERVAL_SECONDS=900
+
+# Run scheduler
 python -m src.scheduler
 ```
 
-Set secrets through a `.env` file (not committed):
+### 4. Deploy Contract
+
+Deploy the `MarketPredictionManager` contract to GenLayer:
+
+```bash
+# Using genlayer-js (from frontend directory)
+# Or using genlayer-py (from backend directory)
+```
+
+See [Deployment Guide](#-deployment) for detailed instructions.
+
+---
+
+## 📁 Project Structure
 
 ```
-PRIVATE_KEY=0xabc...
+ai-price-prediction/
+├── contracts/
+│   └── MarketPredictionManager.py    # GenLayer Intelligent Contract
+│
+├── app/                              # Next.js Frontend
+│   ├── api/
+│   │   └── generate-context/         # API route for context generation
+│   ├── components/
+│   │   ├── PredictionCard.tsx        # Main prediction display
+│   │   ├── PredictionHistory.tsx     # History timeline
+│   │   ├── PriceChart.tsx            # Price visualization
+│   │   ├── SymbolComparison.tsx      # Multi-symbol comparison
+│   │   ├── SymbolManagerDialog.tsx   # Add new symbols
+│   │   └── SkeletonLoader.tsx        # Loading states
+│   ├── page.tsx                      # Main dashboard
+│   ├── providers.tsx                 # Wallet providers
+│   └── globals.css                    # Global styles
+│
+├── backend/                          # Python Backend
+│   ├── src/
+│   │   ├── context_builder.py        # Market data aggregation
+│   │   ├── scheduler.py              # Update scheduler
+│   │   └── tx_sender.py              # Transaction handling
+│   ├── scripts/                      # Utility scripts
+│   └── requirements.txt              # Python dependencies
+│
+├── lib/                              # Shared utilities
+│   ├── contract.ts                   # Contract interaction
+│   ├── genlayer.ts                   # GenLayer client
+│   └── utils.ts                      # Helper functions
+│
+└── public/                           # Static assets
+```
+
+---
+
+## 📚 Documentation
+
+### Contract Methods
+
+#### Write Methods
+
+- `add_symbol(symbol: str, description: str)` - Register a new symbol
+- `request_update(symbol: str, context_json: str)` - Submit prediction update
+- `update_symbol_status(symbol: str, is_active: bool)` - Enable/disable symbol
+- `set_max_history(history_window: int)` - Configure history retention
+
+#### View Methods
+
+- `list_symbols()` - Get all registered symbols
+- `get_symbol_config(symbol: str)` - Get symbol configuration
+- `get_latest_prediction(symbol: str)` - Get latest prediction
+- `get_prediction_history(symbol: str, limit: int)` - Get prediction history
+
+### API Endpoints
+
+#### Frontend API Routes
+
+- `GET /api/generate-context?symbol=BTC` - Generate market context for a symbol
+
+### Environment Variables
+
+#### Frontend (.env.local)
+
+```env
+NEXT_PUBLIC_CONTRACT_ADDRESS=0x...
+NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
+NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=your_project_id
+```
+
+#### Backend (.env)
+
+```env
+PRIVATE_KEY=0x...
 CONTRACT_ADDRESS=0x...
 GENLAYER_RPC_URL=https://studio.genlayer.com/api
-SYMBOLS=BTC,ETH,SOL,AVAX,ARB
-UPDATE_INTERVAL_SECONDS=900
+SYMBOLS=BTC,ETH,SOL          # Optional: Whitelist (empty = all symbols)
+UPDATE_INTERVAL_SECONDS=900  # Default: 15 minutes
 ```
 
-## Deployment Steps
+---
 
-1. Deploy `MarketPredictionManager` using `genlayer-js` or the Python client.
-2. Update the frontend `.env.local` with the deployed address and run `npm run build`.
-3. Start the backend scheduler to push hourly updates.
-4. (Optional) Configure a CI pipeline to deploy the Next.js app to Vercel or similar.
+## 🎯 Usage Guide
 
-## License
+### Adding a New Symbol
 
-MIT — see `LICENSE`.
+1. Connect your wallet in the frontend
+2. Click "Add Symbol" button
+3. Enter symbol code (e.g., `BTC`, `ETH`, `DOGE`)
+4. Enter description (optional)
+5. Click "Add Symbol"
+6. The system will automatically generate the first prediction
 
+### Viewing Predictions
+
+- **Main View**: Select a symbol from the sidebar to view its latest prediction
+- **History Tab**: View timeline of past predictions with accuracy metrics
+- **Comparison Tab**: Compare predictions across multiple symbols
+
+### Understanding Predictions
+
+- **Predicted Price**: AI forecast for 24 hours from now
+- **Confidence**: 0-100 score indicating prediction certainty
+- **Outlook**: Bullish (↑), Bearish (↓), or Neutral (→)
+- **Summary**: Brief overview of key factors
+- **Reasoning**: Detailed analysis combining technical and fundamental factors
+- **Key Events**: Major drivers affecting the prediction
+- **Sources**: Data sources and references
+
+---
+
+## 🔧 Configuration
+
+### Backend Scheduler
+
+The scheduler automatically reads all symbols from the contract and updates them:
+
+- **With SYMBOLS in .env**: Only updates whitelisted symbols
+- **Without SYMBOLS in .env**: Updates ALL symbols from contract
+
+This allows you to add symbols via frontend without modifying backend code.
+
+### Update Interval
+
+Default: 15 minutes (900 seconds)
+
+Change via `UPDATE_INTERVAL_SECONDS` in backend `.env`
+
+### History Retention
+
+Default: 168 predictions per symbol
+
+Configure via `set_max_history()` contract method
+
+---
+
+## 🚢 Deployment
+
+### 1. Deploy Contract
+
+```bash
+# Using genlayer-js
+import { createClient } from 'genlayer-js'
+import { readFileSync } from 'fs'
+
+const client = createClient({ rpcUrl: 'https://studio.genlayer.com/api' })
+const contractCode = readFileSync('./contracts/MarketPredictionManager.py', 'utf-8')
+
+const address = await client.deployContract({
+  code: contractCode,
+  args: [168] // max_history default
+})
+```
+
+### 2. Deploy Frontend
+
+#### Vercel (Recommended)
+
+```bash
+npm install -g vercel
+vercel
+```
+
+#### Other Platforms
+
+```bash
+npm run build
+npm start
+```
+
+### 3. Deploy Backend
+
+Run scheduler on a server or cloud platform:
+
+```bash
+# Using systemd (Linux)
+# Create /etc/systemd/system/price-oracle.service
+
+# Using Docker
+docker build -t price-oracle-backend .
+docker run -d --env-file .env price-oracle-backend
+```
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend
+- **Next.js 15** - React framework
+- **TypeScript** - Type safety
+- **TailwindCSS** - Styling
+- **Framer Motion** - Animations
+- **RainbowKit/Wagmi** - Wallet integration
+- **Recharts** - Data visualization
+- **TanStack Query** - Data fetching
+- **genlayer-js** - GenLayer SDK
+
+### Backend
+- **Python 3.12+** - Runtime
+- **genlayer-py** - GenLayer SDK
+- **httpx** - HTTP client
+- **schedule** - Task scheduling
+- **python-dotenv** - Environment management
+
+### Contract
+- **GenLayer Intelligent Contract** - AI-powered smart contract
+- **Equivalence Principle** - Non-deterministic validation
+
+### APIs
+- **Binance API** - Primary price/OHLC data
+- **CoinGecko API** - Fallback price data
+- **CryptoCompare API** - News headlines
+
+---
+
+## 📊 Features in Detail
+
+### Technical Analysis
+
+The system calculates and analyzes:
+
+- **RSI (Relative Strength Index)**: 14-period RSI for overbought/oversold conditions
+- **MACD Signal**: Difference between MA7 and MA20
+- **Moving Averages**: 7-day and 20-day moving averages
+- **Support/Resistance**: Recent high/low levels
+- **Trend Direction**: Bullish, Bearish, or Neutral based on price position relative to MAs
+- **Price Position**: Distance from support/resistance levels
+
+### News Filtering
+
+- Symbol-specific news headlines
+- Intelligent filtering by symbol name variations
+- Fallback to general market news if needed
+- Avoids confusion from other coin mentions
+
+### Auto-Detection
+
+New symbols are automatically detected:
+
+- **Binance**: Tries `{SYMBOL}USDT` pattern
+- **CoinGecko**: Tries lowercase symbol name
+- **News**: Uses symbol variations for filtering
+
+No backend code changes required!
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Development Guidelines
+
+- Follow TypeScript/Python best practices
+- Add comments for complex logic
+- Update documentation for new features
+- Test thoroughly before submitting PR
+
+---
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **GenLayer** - For the Intelligent Contract platform
+- **Binance** - For reliable price data APIs
+- **CoinGecko** - For comprehensive market data
+- **CryptoCompare** - For news aggregation
+
+---
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/ngh1105/AI-Price-Prediction-Oracle/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/ngh1105/AI-Price-Prediction-Oracle/discussions)
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Multi-timeframe predictions (1h, 4h, 12h, 24h, 7d, 30d)
+- [ ] Prediction accuracy tracking and leaderboard
+- [ ] User alerts and notifications
+- [ ] Advanced analytics dashboard
+- [ ] API access for third-party integrations
+- [ ] Mobile app support
+- [ ] Prediction marketplace and staking
+
+---
+
+<div align="center">
+
+**Built with ❤️ using GenLayer**
+
+[⭐ Star this repo](https://github.com/ngh1105/AI-Price-Prediction-Oracle) if you find it helpful!
+
+</div>
