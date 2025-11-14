@@ -39,9 +39,22 @@ function calculateWeightedAverage(predictions: Record<string, Prediction>): numb
 
   for (const [tf, pred] of Object.entries(predictions)) {
     const price = parsePredictedPrice(pred.predicted_price as string)
-    if (price && weights[tf as Timeframe]) {
-      total += price * weights[tf as Timeframe]
-      totalWeight += weights[tf as Timeframe]
+    const baseWeight = weights[tf as Timeframe] ?? 0
+
+    let confidenceValue = 0
+    if (typeof pred.confidence === 'number') {
+      confidenceValue = pred.confidence
+    } else if (typeof pred.confidence === 'string') {
+      const parsed = parseFloat(pred.confidence)
+      confidenceValue = isNaN(parsed) ? 0 : parsed
+    }
+
+    const confidenceWeight = Math.max(0, Math.min(confidenceValue, 100)) / 100
+
+    if (price !== null && baseWeight > 0 && confidenceWeight > 0) {
+      const weight = baseWeight * confidenceWeight
+      total += price * weight
+      totalWeight += weight
     }
   }
 

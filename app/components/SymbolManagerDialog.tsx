@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useAccount } from 'wagmi'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { addSymbol, requestSymbolUpdate } from '@/lib/contract'
+import { addSymbol } from '@/lib/contract'
 import { cn } from '@/lib/utils'
 import { Plus, FileText } from 'lucide-react'
 
@@ -67,13 +67,19 @@ export function SymbolManagerDialog({
         const context = await contextResp.json()
         const contextJson = JSON.stringify(context)
         
-        // Submit prediction
-        await requestSymbolUpdate(address, {
+        // Submit predictions for ALL timeframes
+        const { requestSymbolUpdateAllTimeframes } = await import('@/lib/contract')
+        const results = await requestSymbolUpdateAllTimeframes(address, {
           symbol: values.symbol.toUpperCase(),
           contextJson: contextJson,
         }, provider)
         
-        toast.success(`Initial prediction submitted for ${values.symbol.toUpperCase()}`)
+        const successCount = results.filter(r => r.success).length
+        if (successCount > 0) {
+          toast.success(`Initial predictions submitted for ${values.symbol.toUpperCase()} (${successCount}/6 timeframes)`)
+        } else {
+          toast.warning(`Symbol added, but prediction submission failed`)
+        }
       } catch (predError: any) {
         // Log error but don't fail the add symbol operation
         console.error('Failed to auto-generate prediction:', predError)

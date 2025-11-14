@@ -45,6 +45,26 @@ class MarketPredictionManager(gl.Contract):
         if default_history_window <= 0:
             default_history_window = 168
         self.max_history = u32(default_history_window)
+        self._initialise_timeframe_state()
+
+    def _initialise_timeframe_state(self) -> None:
+        """
+        Migration helper to seed timeframe-specific storage from legacy 24h data.
+        """
+        try:
+            for symbol in self.symbols:
+                legacy_counter = self.symbol_counters.get(symbol)
+                if legacy_counter is None:
+                    continue
+                tf_key = f"{symbol}-24h"
+                if self.symbol_timeframe_counters.get(tf_key) is None:
+                    self.symbol_timeframe_counters[tf_key] = legacy_counter
+                legacy_latest = self.symbol_latest_prediction.get(symbol)
+                if legacy_latest is not None and self.symbol_timeframe_latest.get(tf_key) is None:
+                    self.symbol_timeframe_latest[tf_key] = legacy_latest
+        except Exception:
+            # Best-effort migration; ignore errors to avoid reverting contract init
+            pass
 
     @gl.public.write
     def add_symbol(self, symbol: str, description: str) -> None:
@@ -92,9 +112,16 @@ class MarketPredictionManager(gl.Contract):
 
         payload = self._execute_prediction(key, tf, context_json)
 
-        # Use timeframe-specific counter
         tf_key = f"{key}-{tf}"
-        counter = int(self.symbol_timeframe_counters.get(tf_key, u64(0)))
+
+        if tf == "24h":
+            counter = int(self.symbol_counters.get(key, u64(0)))
+            # Keep timeframe counter in sync but do not treat it as source of truth
+            if self.symbol_timeframe_counters.get(tf_key) is None:
+                self.symbol_timeframe_counters[tf_key] = u64(counter)
+        else:
+            counter = int(self.symbol_timeframe_counters.get(tf_key, u64(0)))
+
         next_counter = counter + 1
         prediction_id = f"{key}-{tf}-{next_counter}"
 
@@ -109,21 +136,27 @@ class MarketPredictionManager(gl.Contract):
 
         # Store in timeframe-specific storage
         self.predictions[prediction_id] = record
-        self.symbol_timeframe_counters[tf_key] = u64(next_counter)
         self.symbol_timeframe_latest[tf_key] = prediction_id
 
-        # Also update legacy storage for backward compatibility (24h only)
         if tf == "24h":
             self.symbol_counters[key] = u64(next_counter)
             self.symbol_latest_prediction[key] = prediction_id
+            self.symbol_timeframe_counters[tf_key] = u64(next_counter)
+        else:
+            self.symbol_timeframe_counters[tf_key] = u64(next_counter)
 
         # History trimming per timeframe
         max_keep = int(self.max_history)
         if max_keep > 0 and next_counter > max_keep:
             remove_index = next_counter - max_keep
-            remove_id = f"{key}-{tf}-{remove_index}"
-            if remove_id in self.predictions:
-                del self.predictions[remove_id]
+            if tf == "24h":
+                remove_id_new = f"{key}-24h-{remove_index}"
+                self._delete_prediction_if_exists(remove_id_new)
+                legacy_id = f"{key}-{remove_index}"
+                self._delete_prediction_if_exists(legacy_id)
+            else:
+                remove_id = f"{key}-{tf}-{remove_index}"
+                self._delete_prediction_if_exists(remove_id)
 
         return prediction_id
 
@@ -355,8 +388,11 @@ sources should cite URLs or clear identifiers.
         collected = 0
 
         while current >= 1 and collected < max_entries:
-            prediction_id = f"{key}-24h-{current}"  # Updated to include timeframe
+            prediction_id = f"{key}-24h-{current}"
             record = self.predictions.get(prediction_id)
+            if record is None:
+                legacy_id = f"{key}-{current}"
+                record = self.predictions.get(legacy_id)
             if record is not None:
                 history.append(self._record_to_map(record))
                 collected += 1
@@ -416,4 +452,9 @@ sources should cite URLs or clear identifiers.
         data["sources_json"] = record.sources_json
         data["raw_context"] = record.raw_context
         return data
+
+    def _delete_prediction_if_exists(self, prediction_id: str) -> None:
+        record = self.predictions.get(prediction_id)
+        if record is not None:
+            del self.predictions[prediction_id]
 

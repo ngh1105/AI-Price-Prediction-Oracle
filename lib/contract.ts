@@ -109,6 +109,43 @@ export async function requestSymbolUpdate(
   return waitForTransactionReceipt(tx, 'ACCEPTED')
 }
 
+// Submit predictions for all timeframes at once
+export async function requestSymbolUpdateAllTimeframes(
+  account: Account | Address | undefined,
+  { symbol, contextJson }: { symbol: string; contextJson: string },
+  provider?: any
+): Promise<Array<{ timeframe: Timeframe; txHash: string; success: boolean; error?: string }>> {
+  const results: Array<{ timeframe: Timeframe; txHash: string; success: boolean; error?: string }> = []
+  
+  // Submit for each timeframe sequentially
+  for (const timeframe of TIMEFRAMES) {
+    try {
+      const tx = await writeContract(account, 'request_update', [symbol, contextJson, timeframe], 0n, provider)
+      // Don't wait for receipt - just submit and continue
+      // Transactions will be processed asynchronously
+      results.push({
+        timeframe,
+        txHash: tx,
+        success: true,
+      })
+      
+      // Small delay between submissions to avoid rate limits
+      if (timeframe !== TIMEFRAMES[TIMEFRAMES.length - 1]) {
+        await new Promise(resolve => setTimeout(resolve, 1000)) // 1 second delay
+      }
+    } catch (error: any) {
+      results.push({
+        timeframe,
+        txHash: '',
+        success: false,
+        error: error?.message || 'Unknown error',
+      })
+    }
+  }
+  
+  return results
+}
+
 // Timeframe constants
 export const TIMEFRAMES = ['1h', '4h', '12h', '24h', '7d', '30d'] as const
 export type Timeframe = typeof TIMEFRAMES[number]

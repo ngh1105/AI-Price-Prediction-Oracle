@@ -118,15 +118,24 @@ def submit_prediction_update(client, contract_address: str, symbol: str, context
         logger.error(f"Failed to submit transaction: {e}", exc_info=True)
         raise
     
-    # Wait for transaction to be accepted
+    # Wait for transaction to be accepted (with increased timeout)
     try:
-        receipt = client.wait_for_transaction_receipt(transaction_hash=tx_hash, status=TransactionStatus.ACCEPTED)
+        receipt = client.wait_for_transaction_receipt(
+            transaction_hash=tx_hash, 
+            status=TransactionStatus.ACCEPTED,
+            retries=20,  # Increase from default 10 to 20 (60 seconds total)
+            interval=3000  # 3 seconds between retries
+        )
         receipt_id = receipt.id if hasattr(receipt, 'id') else ''
         logger.info(f"Transaction accepted: {tx_hash}, receipt_id={receipt_id}")
         return tx_hash, receipt_id  # type: ignore[attr-defined]
     except Exception as e:
-        logger.error(f"Failed to wait for transaction receipt: {e}", exc_info=True)
-        raise
+        # Log warning but don't fail - transaction was submitted successfully
+        # It may still be processing on the network
+        logger.warning(f"Transaction submitted but not yet accepted: {tx_hash}")
+        logger.warning(f"Transaction may still be processing. Error: {e}")
+        # Return tx_hash anyway so scheduler can continue
+        return tx_hash, ''
 
 
 def add_symbol(client, contract_address: str, symbol: str, description: str) -> Tuple[str, str]:
@@ -160,11 +169,17 @@ def add_symbol(client, contract_address: str, symbol: str, description: str) -> 
         raise
     
     try:
-        receipt = client.wait_for_transaction_receipt(transaction_hash=tx_hash, status=TransactionStatus.ACCEPTED)
+        receipt = client.wait_for_transaction_receipt(
+            transaction_hash=tx_hash, 
+            status=TransactionStatus.ACCEPTED,
+            retries=20,
+            interval=3000
+        )
         receipt_id = receipt.id if hasattr(receipt, 'id') else ''
         logger.info(f"Add symbol transaction accepted: {tx_hash}, receipt_id={receipt_id}")
         return tx_hash, receipt_id  # type: ignore[attr-defined]
     except Exception as e:
-        logger.error(f"Failed to wait for transaction receipt: {e}", exc_info=True)
-        raise
+        logger.warning(f"Add symbol transaction submitted but not yet accepted: {tx_hash}")
+        logger.warning(f"Transaction may still be processing. Error: {e}")
+        return tx_hash, ''
 

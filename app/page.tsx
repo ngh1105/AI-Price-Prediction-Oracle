@@ -5,7 +5,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useWalletClient } from 'wagmi'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast, Toaster } from 'sonner'
-import { fetchLatestPrediction, fetchLatestPredictionByTimeframe, listSymbols, requestSymbolUpdate, TIMEFRAMES, type Timeframe } from '@/lib/contract'
+import { fetchLatestPrediction, fetchLatestPredictionByTimeframe, listSymbols, requestSymbolUpdate, requestSymbolUpdateAllTimeframes, TIMEFRAMES, type Timeframe } from '@/lib/contract'
 import { PredictionCard, type Prediction } from './components/PredictionCard'
 import { SymbolManagerDialog } from './components/SymbolManagerDialog'
 import { PredictionCardSkeleton } from './components/SkeletonLoader'
@@ -149,17 +149,37 @@ export default function Page() {
 
       const parsed = JSON.parse(contextJson)
       const minified = JSON.stringify(parsed)
-      await requestSymbolUpdate(address, { symbol: selectedSymbol, contextJson: minified, timeframe: selectedTimeframe }, provider)
+      
+      // Submit for ALL timeframes automatically
+      const results = await requestSymbolUpdateAllTimeframes(address, { 
+        symbol: selectedSymbol, 
+        contextJson: minified 
+      }, provider)
+      
+      // Count successes
+      const successCount = results.filter(r => r.success).length
+      const failedCount = results.filter(r => !r.success).length
+      
+      if (successCount > 0) {
+        return { successCount, failedCount, results }
+      } else {
+        throw new Error('Failed to submit any predictions')
+      }
     },
-    onSuccess: () => {
-      toast.success('Prediction update submitted. Validators will finalise shortly.')
-      queryClient.invalidateQueries({ queryKey: ['prediction', selectedSymbol, selectedTimeframe] })
+    onSuccess: (data) => {
+      if (data.failedCount > 0) {
+        toast.success(`Predictions submitted for ${data.successCount}/6 timeframes. ${data.failedCount} failed.`)
+      } else {
+        toast.success(`Predictions submitted for all ${data.successCount} timeframes!`)
+      }
+      // Invalidate all prediction queries
+      queryClient.invalidateQueries({ queryKey: ['prediction'] })
       queryClient.invalidateQueries({ queryKey: ['all-timeframe-predictions', selectedSymbol] })
       generateContext.reset()
     },
     onError: (error: any) => {
       console.error(error)
-      toast.error(error?.message ?? 'Failed to submit update')
+      toast.error(error?.message ?? 'Failed to submit predictions')
     },
   })
 
@@ -428,7 +448,7 @@ export default function Page() {
                   Generate Prediction
                 </h3>
                 <p className="text-sm text-muted leading-relaxed">
-                  Automatically generate a price prediction for the selected symbol. The system will fetch current market data, technical indicators, and news to create a comprehensive analysis.
+                  Automatically generate price predictions for all timeframes (1h, 4h, 12h, 24h, 7d, 30d) for the selected symbol. The system will fetch current market data, technical indicators, and news to create comprehensive analyses.
                 </p>
               </div>
 
@@ -452,10 +472,10 @@ export default function Page() {
                     {generateContext.isPending
                       ? 'Generating context...'
                       : requestUpdate.isPending
-                      ? 'Submitting prediction...'
+                      ? 'Submitting predictions for all timeframes...'
                       : !address
                       ? 'Connect wallet to generate'
-                      : 'Generate & Submit Prediction'}
+                      : 'Generate & Submit All Timeframes'}
                   </button>
 
                   {generateContext.isError && (
