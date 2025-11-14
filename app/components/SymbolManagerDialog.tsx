@@ -48,11 +48,20 @@ export function SymbolManagerDialog({
     setSubmitting(true)
     try {
       // Add symbol to contract
-      await addSymbol(address, {
-        symbol: values.symbol,
+      const receipt = await addSymbol(address, {
+        symbol: values.symbol.toUpperCase(),
         description: values.description,
       }, provider)
-      toast.success(`Symbol ${values.symbol.toUpperCase()} added`)
+      
+      // Check if transaction was actually accepted or just submitted
+      if (receipt && receipt.id) {
+        toast.success(`Symbol ${values.symbol.toUpperCase()} added successfully`)
+      } else {
+        // Transaction submitted but not yet accepted
+        toast.success(`Symbol ${values.symbol.toUpperCase()} transaction submitted. It may take a moment to process.`, {
+          duration: 8000,
+        })
+      }
       
       // Automatically generate and submit first prediction
       try {
@@ -93,8 +102,30 @@ export function SymbolManagerDialog({
       
       reset()
     } catch (error: any) {
-      console.error(error)
-      toast.error(error?.message ?? 'Failed to add symbol')
+      console.error('Error adding symbol:', error)
+      
+      // Check if it's a transaction timeout error (transaction submitted but not accepted)
+      const errorMessage = error?.message || String(error)
+      const isTimeoutError = errorMessage.includes('not ACCEPTED') || 
+                            errorMessage.includes('timeout') ||
+                            errorMessage.includes('not yet accepted')
+      
+      if (isTimeoutError) {
+        // Transaction was submitted but not yet accepted - this is common with GenLayer
+        toast.warning(
+          `Symbol ${values.symbol.toUpperCase()} transaction submitted but not yet confirmed. It may take a moment to process. Please refresh the page in a few seconds.`,
+          {
+            duration: 10000,
+          }
+        )
+        // Still notify parent to refresh (symbol might be added)
+        if (onSymbolAdded) {
+          setTimeout(() => onSymbolAdded(values.symbol.toUpperCase()), 2000)
+        }
+      } else {
+        // Actual error - transaction submission failed
+        toast.error(error?.message ?? 'Failed to add symbol. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
