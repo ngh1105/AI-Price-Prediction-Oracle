@@ -42,25 +42,41 @@ export default function Page() {
     queryKey: ['health'],
     queryFn: async () => {
       const resp = await fetch('/api/health')
+      const data = await resp.json()
       if (!resp.ok) {
-        throw new Error('Health check failed')
+        // Include error data in the thrown error
+        const error = new Error(data.error || 'Health check failed') as any
+        error.response = { data }
+        throw error
       }
-      return resp.json()
+      return data
     },
     refetchInterval: 30_000, // Check every 30 seconds
     retry: 2,
     retryDelay: 5000,
+    // Don't show error toast on initial load if wallet not connected
+    retryOnMount: false,
   })
 
   // Alert user if health check fails
   useEffect(() => {
     if (healthQuery.isError && !healthQuery.isFetching) {
-      toast.error('System health check failed. Some features may not work correctly.', {
-        duration: 10000,
-        id: 'health-check-error', // Prevent duplicate toasts
-      })
+      const errorData = healthQuery.error as any
+      const errorMessage = errorData?.response?.data?.error || errorData?.message || 'System health check failed'
+      const suggestion = errorData?.response?.data?.suggestion || ''
+      
+      toast.error(
+        <div>
+          <div className="font-semibold">{errorMessage}</div>
+          {suggestion && <div className="text-sm mt-1 opacity-90">{suggestion}</div>}
+        </div>,
+        {
+          duration: 15000,
+          id: 'health-check-error', // Prevent duplicate toasts
+        }
+      )
     }
-  }, [healthQuery.isError, healthQuery.isFetching])
+  }, [healthQuery.isError, healthQuery.isFetching, healthQuery.error])
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('24h')

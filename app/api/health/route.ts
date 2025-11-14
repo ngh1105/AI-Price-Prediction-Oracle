@@ -11,7 +11,8 @@ export async function GET() {
       return NextResponse.json(
         { 
           status: 'unhealthy', 
-          error: 'Contract address not configured',
+          error: 'Contract address not configured. Please set NEXT_PUBLIC_CONTRACT_ADDRESS in .env.local',
+          contractAddress: contractAddress || 'not set',
           timestamp: new Date().toISOString()
         },
         { status: 503 }
@@ -20,7 +21,14 @@ export async function GET() {
 
     // Try to read from contract
     try {
-      const symbols = await readContract('list_symbols', [])
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Health check timeout after 10 seconds')), 10000)
+      )
+      
+      const symbolsPromise = readContract('list_symbols', [])
+      const symbols = await Promise.race([symbolsPromise, timeoutPromise]) as any
+      
       const symbolCount = Array.isArray(symbols) ? symbols.length : 0
       
       return NextResponse.json({
@@ -30,11 +38,32 @@ export async function GET() {
         timestamp: new Date().toISOString(),
       })
     } catch (error: any) {
+      // Provide more detailed error information
+      const errorMessage = error?.message || String(error) || 'Failed to read contract'
+      const errorString = errorMessage.toLowerCase()
+      
+      const isNetworkError = errorString.includes('network') || 
+                            errorString.includes('fetch') || 
+                            errorString.includes('econnrefused') ||
+                            errorString.includes('timeout') ||
+                            errorString.includes('failed to fetch')
+      const isContractError = errorString.includes('contract') || 
+                             errorString.includes('address') ||
+                             errorString.includes('not found')
+      
+      console.error('[Health Check] Error:', errorMessage, error)
+      
       return NextResponse.json(
         {
           status: 'unhealthy',
-          error: error?.message || 'Failed to read contract',
+          error: errorMessage,
+          errorType: isNetworkError ? 'network' : isContractError ? 'contract' : 'unknown',
           contractAddress,
+          suggestion: isNetworkError 
+            ? 'Check RPC URL configuration (NEXT_PUBLIC_GENLAYER_RPC_URL) and network connectivity'
+            : isContractError
+            ? 'Verify contract address is correct and deployed on GenLayer network'
+            : 'Check browser console and server logs for more details',
           timestamp: new Date().toISOString(),
         },
         { status: 503 }
@@ -45,6 +74,7 @@ export async function GET() {
       {
         status: 'unhealthy',
         error: error?.message || 'Unknown error',
+        errorType: 'unknown',
         timestamp: new Date().toISOString(),
       },
       { status: 500 }
