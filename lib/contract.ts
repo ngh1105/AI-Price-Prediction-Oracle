@@ -106,6 +106,11 @@ export async function writeContract(
     try {
       const { trackTransactionGlobal } = await import('./transactionTrackerCore')
       trackTransactionGlobal(txHash, functionName, args)
+      
+      // Also call registered transaction tracker if set
+      if (transactionTracker) {
+        transactionTracker(txHash, functionName, args)
+      }
     } catch (trackError) {
       // Don't fail the transaction if tracking fails
       console.warn('[writeContract] Failed to track transaction:', trackError)
@@ -315,6 +320,11 @@ export async function requestSymbolUpdateAllTimeframes(
       try {
         const { trackTransactionGlobal } = await import('./transactionTrackerCore')
         trackTransactionGlobal(tx, 'request_update', [symbol, contextJson, timeframe])
+        
+        // Also call registered transaction tracker if set
+        if (transactionTracker) {
+          transactionTracker(tx, 'request_update', [symbol, contextJson, timeframe])
+        }
       } catch (trackError) {
         // Don't fail if tracking fails
         console.warn('[requestSymbolUpdateAllTimeframes] Failed to track transaction:', trackError)

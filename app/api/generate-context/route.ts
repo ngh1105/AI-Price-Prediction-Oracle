@@ -275,9 +275,28 @@ async function fetchNews(symbol: string): Promise<any[]> {
 }
 
 export async function GET(request: NextRequest) {
-  // Rate limiting
-  const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-  const rateLimit = checkRateLimit(ip)
+  // Rate limiting with proper IP detection
+  const forwardedFor = request.headers.get('x-forwarded-for')
+  const realIp = request.headers.get('x-real-ip')
+  const ip = forwardedFor?.split(',')[0]?.trim() || realIp || null
+  
+  let rateLimitKey: string
+  let isGeneratedId = false
+  let rateLimitLimit = '30' // Default limit
+  
+  if (!ip) {
+    // Generate per-request UUID for requests without IP headers
+    // Use a more permissive limit for these requests
+    const { randomUUID } = await import('crypto')
+    rateLimitKey = `session-${randomUUID()}`
+    isGeneratedId = true
+    rateLimitLimit = '60' // Higher limit for session-based requests
+    console.warn('[generate-context] Missing client IP headers, using generated session ID for rate limiting:', rateLimitKey)
+  } else {
+    rateLimitKey = ip
+  }
+  
+  const rateLimit = checkRateLimit(rateLimitKey)
   
   if (!rateLimit.allowed) {
     return NextResponse.json(
@@ -289,10 +308,11 @@ export async function GET(request: NextRequest) {
       { 
         status: 429,
         headers: {
-          'X-RateLimit-Limit': '30',
+          'X-RateLimit-Limit': rateLimitLimit,
           'X-RateLimit-Remaining': '0',
           'X-RateLimit-Reset': rateLimit.resetAt.toString(),
           'Retry-After': Math.ceil((rateLimit.resetAt - Date.now()) / 1000).toString(),
+          'X-RateLimit-Identifier-Type': isGeneratedId ? 'session' : 'ip',
         },
       }
     )
@@ -369,12 +389,18 @@ export async function GET(request: NextRequest) {
       notes: 'Context includes technical indicators (RSI, MACD, MA, Support/Resistance) and fundamental data (news, trends)',
     }
 
+    // Log whether we used generated ID or real IP
+    if (isGeneratedId) {
+      console.log('[generate-context] Request processed with generated session ID:', rateLimitKey)
+    }
+    
     const response = NextResponse.json(context)
     
     // Add rate limit headers
-    response.headers.set('X-RateLimit-Limit', '30')
+    response.headers.set('X-RateLimit-Limit', rateLimitLimit)
     response.headers.set('X-RateLimit-Remaining', rateLimit.remaining.toString())
     response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toString())
+    response.headers.set('X-RateLimit-Identifier-Type', isGeneratedId ? 'session' : 'ip')
     
     return response
   } catch (error: any) {
