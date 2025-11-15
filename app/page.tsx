@@ -613,7 +613,8 @@ export default function Page() {
 
           <aside className="space-y-6">
             <SymbolManagerDialog 
-              provider={provider} 
+              provider={provider}
+              useLocalAccount={useLocalAccount}
               onSymbolAdded={async (symbol) => {
                 // Force immediate refresh of symbols list
                 await queryClient.refetchQueries({ queryKey: ['symbols'] })
