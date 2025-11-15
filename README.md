@@ -389,6 +389,23 @@ docker run -d --env-file .env price-oracle-backend
 
 ---
 
+## 🚀 Deployment
+
+### Deploy lên Vercel
+
+Xem file [VERCEL_DEPLOY.md](./VERCEL_DEPLOY.md) để biết chi tiết cách deploy.
+
+**Lưu ý quan trọng**: Vercel không tự động đọc file `.env.local`. Bạn **PHẢI** cấu hình Environment Variables trong Vercel Dashboard:
+
+1. Vào Vercel Dashboard → Project → Settings → Environment Variables
+2. Thêm các biến sau:
+   - `NEXT_PUBLIC_CONTRACT_ADDRESS`
+   - `NEXT_PUBLIC_GENLAYER_RPC_URL`
+   - `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID`
+3. Redeploy project để áp dụng thay đổi
+
+---
+
 ## 🛠️ Tech Stack
 
 ### Frontend
