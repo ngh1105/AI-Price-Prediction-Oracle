@@ -123,26 +123,26 @@ function getOrCreateLocalAccount(requireConsent: boolean = false): Account {
   let privateKey = localStorage.getItem(STORAGE_KEY)
 
   if (!privateKey) {
-    // Check if user has consented (if consent is required)
-    if (requireConsent) {
-      const hasConsented = localStorage.getItem(CONSENT_KEY) === 'true'
-      if (!hasConsented) {
-        throw new Error('User consent required before creating local account. Please show consent UI first.')
-      }
-      // Only set consent key when consent was explicitly required and obtained
-      // This ensures we only mark consent when it was actually checked
-      localStorage.setItem(CONSENT_KEY, 'true')
+    // When requireConsent is false, we should NOT create a new key
+    // This is for "existing account only" mode - throw error if key doesn't exist
+    if (!requireConsent) {
+      throw new Error('No local private key found; consent required to create one. Please show consent UI first or use requireConsent=true.')
     }
     
-    // Generate new private key
+    // requireConsent is true - check if user has consented
+    const hasConsented = localStorage.getItem(CONSENT_KEY) === 'true'
+    if (!hasConsented) {
+      throw new Error('User consent required before creating local account. Please show consent UI first.')
+    }
+    
+    // Only set consent key when consent was explicitly required and obtained
+    // This ensures we only mark consent when it was actually checked
+    localStorage.setItem(CONSENT_KEY, 'true')
+    
+    // Generate new private key (only when consent is explicitly given)
     privateKey = generatePrivateKey()
     localStorage.setItem(STORAGE_KEY, privateKey)
-    
-    if (requireConsent) {
-      console.log('[glClient] Generated new local account private key (user consent explicitly given)')
-    } else {
-      console.warn('[glClient] Generated new local account private key WITHOUT explicit consent (requireConsent=false)')
-    }
+    console.log('[glClient] Generated new local account private key (user consent explicitly given)')
     
     // Dispatch event for UI to show account address
     if (typeof window !== 'undefined') {

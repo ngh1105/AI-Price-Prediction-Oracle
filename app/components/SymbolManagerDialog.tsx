@@ -52,7 +52,7 @@ export function SymbolManagerDialog({
       const receipt = await addSymbol(address, {
         symbol: values.symbol.toUpperCase(),
         description: values.description,
-      }, provider)
+      }, provider, useLocalAccount)
       
       // Check if transaction was actually accepted or just submitted
       const symbolUpper = values.symbol.toUpperCase()

@@ -1,6 +1,32 @@
 /**
- * Simple in-memory rate limiting for API routes
- * For production, consider using Redis or a dedicated rate limiting service
+ * ⚠️ WARNING: Simple in-memory rate limiting for API routes
+ * 
+ * This implementation is NOT suitable for production and is FUNDAMENTALLY INCOMPATIBLE
+ * with serverless deployments (Vercel, AWS Lambda, Cloudflare Workers, etc.) because:
+ * 
+ * - Each function instance has isolated memory
+ * - Rate limits are NOT enforced across instances
+ * - Multiple instances can each allow the full limit, effectively bypassing rate limiting
+ * 
+ * For production, you MUST use a centralized store:
+ * - Redis (e.g., Upstash Redis for serverless)
+ * - DynamoDB with TTL
+ * - Managed rate-limiting service (e.g., Upstash Rate Limit, Cloudflare Rate Limiting)
+ * - Platform-provided solutions (e.g., Vercel Edge Config, AWS API Gateway throttling)
+ * 
+ * Example migration to Redis:
+ * ```typescript
+ * import { Ratelimit } from '@upstash/ratelimit'
+ * import { Redis } from '@upstash/redis'
+ * 
+ * const ratelimit = new Ratelimit({
+ *   redis: Redis.fromEnv(),
+ *   limiter: Ratelimit.slidingWindow(30, '1 m'),
+ * })
+ * ```
+ * 
+ * See: https://upstash.com/docs/redis/overall/getstarted
+ *      https://vercel.com/docs/edge-network/rate-limiting
  */
 
 interface RateLimitStore {
@@ -27,9 +53,21 @@ export function checkRateLimit(
   const maxRequests = options.maxRequests ?? DEFAULT_MAX_REQUESTS_PER_WINDOW
   const windowMs = options.windowMs ?? RATE_LIMIT_WINDOW_MS
 
+  // Serverless-safe lazy cleanup: remove up to 5 expired entries per call
+  // This avoids unbounded work while preventing memory leaks
+  let cleaned = 0
+  const MAX_CLEANUP_PER_CALL = 5
+  for (const [storeKey, store] of rateLimitStore.entries()) {
+    if (cleaned >= MAX_CLEANUP_PER_CALL) break
+    if (now > store.resetTime) {
+      rateLimitStore.delete(storeKey)
+      cleaned++
+    }
+  }
+
   let store = rateLimitStore.get(key)
 
-  // Clean up expired entries
+  // Clean up expired entry for this key if needed
   if (store && now > store.resetTime) {
     rateLimitStore.delete(key)
     store = undefined
@@ -63,17 +101,5 @@ export function checkRateLimit(
     resetAt: store.resetTime,
     limit: maxRequests,
   }
-}
-
-// Clean up old entries periodically
-if (typeof setInterval !== 'undefined') {
-  setInterval(() => {
-    const now = Date.now()
-    for (const [key, store] of rateLimitStore.entries()) {
-      if (now > store.resetTime) {
-        rateLimitStore.delete(key)
-      }
-    }
-  }, RATE_LIMIT_WINDOW_MS)
 }
 

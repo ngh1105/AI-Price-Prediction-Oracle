@@ -44,17 +44,29 @@ export async function writeContract(
     let client: ReturnType<typeof getClient>
     
     // Use local account (private key) for automatic signing - faster, no user approval needed
+    let useLocalAccountFinal = useLocalAccount
     if (useLocalAccount) {
-      const { getLocalClient } = await import('./glClient')
-      // Pass false to allow silent creation if account already exists
-      // Note: Account creation should have been handled by consent UI in app/page.tsx
-      client = getLocalClient(false)
-      console.log('[writeContract] Using local account for automatic signing (no approval needed)')
-    } else {
-      // Fallback to MetaMask if explicitly requested
+      const { getLocalClient, hasLocalAccountConsent, hasLocalAccount } = await import('./glClient')
+      
+      // Check consent and account existence before using local account
+      // This prevents silent key creation without user consent
+      if (!hasLocalAccountConsent() || !hasLocalAccount()) {
+        console.warn('[writeContract] Local account consent or account missing, falling back to MetaMask')
+        // Fall back to MetaMask if local account not available
+        useLocalAccountFinal = false
+      } else {
+        // Account exists and consent given, safe to use (pass false since we already checked)
+        client = getLocalClient(false)
+        console.log('[writeContract] Using local account for automatic signing (no approval needed)')
+      }
+    }
+    
+    // Fallback to MetaMask if local account not available or not requested
+    if (!useLocalAccountFinal) {
+      // Fallback to MetaMask
       const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
       if (!signer) {
-        throw new Error('No account/signer provided')
+        throw new Error('No account/signer provided and local account not available. Please connect your wallet or enable local account.')
       }
       if (!provider) {
         throw new Error('No provider provided. Please connect your wallet.')
@@ -73,7 +85,7 @@ export async function writeContract(
       console.log('[writeContract] Using MetaMask wallet (requires user approval)')
     }
     
-                const accountAddress = useLocalAccount 
+                const accountAddress = useLocalAccountFinal 
                   ? (await import('./glClient')).getLocalAccountAddress(false) // Account should already exist
                   : (typeof account === 'string' ? account : account?.address)
     
@@ -281,12 +293,23 @@ export async function requestSymbolUpdateAllTimeframes(
   
   // Use local account (private key) for automatic signing - faster, no user approval needed
   if (useLocalAccount) {
-    const { getLocalClient } = await import('./glClient')
-    // Pass false to allow silent creation if account already exists
-    // Note: Account creation should have been handled by consent UI in app/page.tsx
-    client = getLocalClient(false)
-    console.log('[requestSymbolUpdateAllTimeframes] Using local account for automatic signing (no approval needed)')
-  } else {
+    const { getLocalClient, hasLocalAccountConsent, hasLocalAccount } = await import('./glClient')
+    
+    // Check consent and account existence before using local account
+    // This prevents silent key creation without user consent
+    if (!hasLocalAccountConsent() || !hasLocalAccount()) {
+      console.warn('[requestSymbolUpdateAllTimeframes] Local account consent or account missing, falling back to MetaMask')
+      // Fall back to MetaMask if local account not available
+      useLocalAccount = false
+    } else {
+      // Account exists and consent given, safe to use (pass false since we already checked)
+      client = getLocalClient(false)
+      console.log('[requestSymbolUpdateAllTimeframes] Using local account for automatic signing (no approval needed)')
+    }
+  }
+  
+  // Fallback to MetaMask if local account not available or not requested
+  if (!useLocalAccount) {
     // Fallback to MetaMask if explicitly requested
     const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
     if (!signer) {

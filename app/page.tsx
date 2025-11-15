@@ -31,11 +31,14 @@ export default function Page() {
   
   // Initialize local account on mount (with user consent)
   const [localAccountConsentShown, setLocalAccountConsentShown] = useState(false)
+  // Track whether user wants to use local account (based on consent)
+  const [useLocalAccount, setUseLocalAccount] = useState(() => hasLocalAccountConsent())
   
   useEffect(() => {
     // Check if user has already consented
     if (hasLocalAccountConsent()) {
       // User has already consented, initialize account (consent already checked, pass false)
+      setUseLocalAccount(true)
       try {
         const localAddress = getLocalAccountAddress(false)
         console.log('[Page] Local account initialized:', localAddress)
@@ -58,6 +61,7 @@ export default function Page() {
       
       if (confirmed) {
         setLocalAccountConsent(true)
+        setUseLocalAccount(true)
         try {
           // Pass true to require consent (which we just obtained)
           const localAddress = getLocalAccountAddress(true)
@@ -65,9 +69,11 @@ export default function Page() {
           toast.info('Local account created. Transactions will be faster!', { duration: 3000 })
         } catch (error) {
           console.warn('[Page] Failed to create local account:', error)
+          setUseLocalAccount(false)
         }
       } else {
         setLocalAccountConsent(false)
+        setUseLocalAccount(false)
         console.log('[Page] User declined local account creation')
       }
     }
@@ -254,7 +260,7 @@ export default function Page() {
       const results = await requestSymbolUpdateAllTimeframes(address, { 
         symbol: selectedSymbol, 
         contextJson: minified 
-      }, provider)
+      }, provider, useLocalAccount)
       
       // Count successes
       const successCount = results.filter(r => r.success).length
