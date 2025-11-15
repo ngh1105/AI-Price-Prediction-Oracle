@@ -141,12 +141,14 @@ cd AI-Price-Prediction-Oracle
 npm install
 
 # Create environment file
-cp .env.example .env.local
-
-# Edit .env.local with your configuration
+# Create .env.local file in the root directory with:
 NEXT_PUBLIC_CONTRACT_ADDRESS=0xYourDeployedContract
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
 NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=your_wc_project_id
+
+# Or copy from example (if .env.example exists):
+# cp .env.example .env.local
+# Then edit .env.local with your actual values
 
 # Run development server
 npm run dev
