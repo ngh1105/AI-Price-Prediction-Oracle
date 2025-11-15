@@ -7,6 +7,7 @@ import { useAccount } from 'wagmi'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { addSymbol } from '@/lib/contract'
+import { formatErrorForToast } from '@/lib/errorUtils'
 import { cn } from '@/lib/utils'
 import { Plus, FileText } from 'lucide-react'
 
@@ -54,21 +55,62 @@ export function SymbolManagerDialog({
       }, provider)
       
       // Check if transaction was actually accepted or just submitted
-      if (receipt && receipt.id) {
-        toast.success(`Symbol ${values.symbol.toUpperCase()} added successfully`)
-      } else {
-        // Transaction submitted but not yet accepted
-        toast.success(`Symbol ${values.symbol.toUpperCase()} transaction submitted. It may take a moment to process.`, {
-          duration: 8000,
-        })
+      const symbolUpper = values.symbol.toUpperCase()
+      
+      // Always poll to verify symbol was added to contract (even if receipt.id exists)
+      // This ensures we wait for the transaction to be processed on-chain
+      toast.info(`Symbol ${symbolUpper} transaction submitted. Waiting for on-chain confirmation...`, {
+        duration: 5000,
+      })
+      
+      // Poll to verify symbol was added to contract
+      let symbolAdded = false
+      const maxAttempts = 30 // Increased from 20 to 30 (60 seconds total)
+      const pollInterval = 2000 // 2 seconds
+      
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval))
+        
+        try {
+          const { listSymbols } = await import('@/lib/contract')
+          const symbols = await listSymbols()
+          console.log(`[Poll ${attempt + 1}/${maxAttempts}] Current symbols:`, symbols)
+          
+          if (symbols.includes(symbolUpper)) {
+            symbolAdded = true
+            console.log(`✅ Symbol ${symbolUpper} confirmed in contract after ${attempt + 1} attempts (${(attempt + 1) * pollInterval / 1000}s)`)
+            break
+          }
+        } catch (pollError) {
+          console.warn(`[Poll ${attempt + 1}] Failed to read symbols:`, pollError)
+          // Continue polling even if one attempt fails
+        }
       }
       
-      // Automatically generate and submit first prediction
+      if (symbolAdded) {
+        toast.success(`Symbol ${symbolUpper} confirmed and added to contract!`)
+      } else {
+        // Transaction may still be processing - show warning but allow user to continue
+        toast.warning(
+          `Symbol ${symbolUpper} transaction submitted but not yet visible on-chain. It may take a few more moments. The transaction is processing.`,
+          {
+            duration: 15000,
+          }
+        )
+        // Still notify parent to refresh (symbol might be added soon)
+        if (onSymbolAdded) {
+          onSymbolAdded(symbolUpper)
+        }
+        reset()
+        return
+      }
+      
+      // Automatically generate and submit first prediction (only after symbol is confirmed)
       try {
-        toast.info(`Generating initial prediction for ${values.symbol.toUpperCase()}...`)
+        toast.info(`Generating initial prediction for ${symbolUpper}...`)
         
         // Generate context
-        const contextResp = await fetch(`/api/generate-context?symbol=${encodeURIComponent(values.symbol.toUpperCase())}`)
+        const contextResp = await fetch(`/api/generate-context?symbol=${encodeURIComponent(symbolUpper)}`)
         if (!contextResp.ok) {
           const error = await contextResp.json()
           throw new Error(error.error || 'Failed to generate context')
@@ -79,13 +121,13 @@ export function SymbolManagerDialog({
         // Submit predictions for ALL timeframes
         const { requestSymbolUpdateAllTimeframes } = await import('@/lib/contract')
         const results = await requestSymbolUpdateAllTimeframes(address, {
-          symbol: values.symbol.toUpperCase(),
+          symbol: symbolUpper,
           contextJson: contextJson,
         }, provider)
         
         const successCount = results.filter(r => r.success).length
         if (successCount > 0) {
-          toast.success(`Initial predictions submitted for ${values.symbol.toUpperCase()} (${successCount}/6 timeframes)`)
+          toast.success(`Initial predictions submitted for ${symbolUpper} (${successCount}/6 timeframes)`)
         } else {
           toast.warning(`Symbol added, but prediction submission failed`)
         }

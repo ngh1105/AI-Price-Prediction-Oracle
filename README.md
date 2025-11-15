@@ -47,7 +47,8 @@ AI Price Prediction Oracle is a decentralized prediction system that leverages *
 - ✅ **Rate Limit Handling**: Exponential backoff retry logic for API calls
 - ✅ **News Filtering**: Symbol-specific news headlines with intelligent filtering
 - ✅ **Real-time Updates**: Auto-refresh every 60 seconds on frontend
-- ✅ **Wallet Integration**: RainbowKit/Wagmi for seamless wallet connection
+- ✅ **Auto-Signing**: Local account for fast transactions without MetaMask approval
+- ✅ **Wallet Integration**: RainbowKit/Wagmi for seamless wallet connection (optional)
 
 ### Data Sources
 - **Price Data**: Binance API (primary), CoinGecko (fallback)
@@ -109,7 +110,7 @@ AI Price Prediction Oracle is a decentralized prediction system that leverages *
 - **Node.js** 18+ and npm
 - **Python** 3.12+ (for backend)
 - **GenLayer Account** and API access
-- **Wallet** (MetaMask, WalletConnect, etc.)
+- **Wallet** (MetaMask, WalletConnect, etc.) - Optional, local account auto-created for faster transactions
 
 ### 1. Clone Repository
 
@@ -270,12 +271,14 @@ UPDATE_INTERVAL_SECONDS=900  # Default: 15 minutes
 
 ### Adding a New Symbol
 
-1. Connect your wallet in the frontend
-2. Click "Add Symbol" button
-3. Enter symbol code (e.g., `BTC`, `ETH`, `DOGE`)
-4. Enter description (optional)
-5. Click "Add Symbol"
+1. Click "Add Symbol" button (no wallet connection needed!)
+2. Enter symbol code (e.g., `BTC`, `ETH`, `DOGE`)
+3. Enter description (optional)
+4. Click "Add Symbol"
+5. Transaction is signed automatically using local account (fast, no approval needed)
 6. The system will automatically generate the first prediction
+
+**Note**: The app automatically creates a local account (private key) when you first open it. This account is used for write operations (add symbol, submit predictions) to provide a faster experience without requiring MetaMask approval for each transaction.
 
 ### Viewing Predictions
 
@@ -474,7 +477,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🗺️ Roadmap
 
-- [ ] Multi-timeframe predictions (1h, 4h, 12h, 24h, 7d, 30d)
+- [x] Multi-timeframe predictions (1h, 4h, 12h, 24h, 7d, 30d)
 - [ ] Prediction accuracy tracking and leaderboard
 - [ ] User alerts and notifications
 - [ ] Advanced analytics dashboard

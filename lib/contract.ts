@@ -1,6 +1,13 @@
 import type { Account, Address, CalldataEncodable } from 'genlayer-js/types'
 import { attachSigner, getClient } from './glClient'
 
+// Transaction tracking (optional - only if hook is used)
+let transactionTracker: ((hash: string, functionName: string, args?: any[]) => void) | null = null
+
+export function setTransactionTracker(tracker: (hash: string, functionName: string, args?: any[]) => void) {
+  transactionTracker = tracker
+}
+
 export const FALLBACK_ADDRESS = '0x1111111111111111111111111111111111111111' as Address
 
 export function getContractAddress(): Address {
@@ -12,9 +19,16 @@ export function getContractAddress(): Address {
 }
 
 export async function readContract(functionName: string, args: CalldataEncodable[] = []) {
-  const client = getClient()
-  const address = getContractAddress()
-  return client.readContract({ address, functionName, args, jsonSafeReturn: true })
+  try {
+    const client = getClient()
+    const address = getContractAddress()
+    const result = await client.readContract({ address, functionName, args, jsonSafeReturn: true })
+    console.log(`[readContract] ${functionName}(${JSON.stringify(args)}) ->`, result)
+    return result
+  } catch (error: any) {
+    console.error(`[readContract] Error calling ${functionName}:`, error)
+    throw error
+  }
 }
 
 export async function writeContract(
@@ -22,40 +36,96 @@ export async function writeContract(
   functionName: string,
   args: CalldataEncodable[] = [],
   value: bigint = 0n,
-  provider?: any
+  provider?: any,
+  useLocalAccount: boolean = true // Default to true: use local account for faster transactions
 ) {
   try {
-    const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
-    if (!signer) {
-      throw new Error('No account/signer provided')
-    }
-    if (!provider) {
-      throw new Error('No provider provided. Please connect your wallet.')
+    const address = getContractAddress()
+    let client: ReturnType<typeof import('./glClient').getClient>
+    
+    // Use local account (private key) for automatic signing - faster, no user approval needed
+    if (useLocalAccount) {
+      const { getLocalClient } = await import('./glClient')
+      client = getLocalClient()
+      console.log('[writeContract] Using local account for automatic signing (no approval needed)')
+    } else {
+      // Fallback to MetaMask if explicitly requested
+      const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
+      if (!signer) {
+        throw new Error('No account/signer provided')
+      }
+      if (!provider) {
+        throw new Error('No provider provided. Please connect your wallet.')
+      }
+      
+      // Ensure window.ethereum is available for GenLayerJS SDK
+      if (typeof window !== 'undefined' && provider && typeof provider.request === 'function') {
+        if (!(window as any).ethereum) {
+          console.warn('[writeContract] window.ethereum not found. GenLayerJS SDK may not work correctly.')
+        }
+      }
+      
+      // Attach signer (will reuse client if provider/address unchanged)
+      attachSigner(provider, signer)
+      client = getClient()
+      console.log('[writeContract] Using MetaMask wallet (requires user approval)')
     }
     
-    attachSigner(provider, signer)
-    const client = getClient()
-    const address = getContractAddress()
+    const accountAddress = useLocalAccount 
+      ? (await import('./glClient')).getLocalAccountAddress()
+      : (typeof account === 'string' ? account : account?.address)
     
     console.log(`[writeContract] Submitting ${functionName} to ${address}`, {
       functionName,
-      args: args.map((a, i) => i === 1 ? `${String(a).substring(0, 50)}...` : a), // Truncate contextJson
-      signer,
+      args: args.map((a, i) => i === 1 ? `${String(a).substring(0, 50)}...` : a), // Truncate long args
+      account: accountAddress,
+      contractAddress: address,
+      useLocalAccount,
+      hasWindowEthereum: typeof window !== 'undefined' ? !!(window as any).ethereum : false,
     })
     
-    const txHash = await client.writeContract({ address, functionName, args, value })
+    // Verify client has account attached
+    console.log(`[writeContract] Client configured, attempting to write...`)
     
-    console.log(`[writeContract] Transaction submitted: ${txHash}`)
+    let txHash: `0x${string}`
+    try {
+      txHash = await client.writeContract({ address, functionName, args, value })
+      console.log(`[writeContract] ✅ Transaction submitted successfully: ${txHash}`)
+    } catch (writeError: any) {
+      console.error(`[writeContract] ❌ client.writeContract failed:`, writeError)
+      console.error(`[writeContract] Error details:`, {
+        message: writeError?.message,
+        code: writeError?.code,
+        data: writeError?.data,
+        stack: writeError?.stack,
+      })
+      throw writeError
+    }
+    
+    // Track transaction for status monitoring
+    try {
+      const { trackTransactionGlobal } = await import('./transactionTrackerCore')
+      trackTransactionGlobal(txHash, functionName, args)
+    } catch (trackError) {
+      // Don't fail the transaction if tracking fails
+      console.warn('[writeContract] Failed to track transaction:', trackError)
+    }
+    
     return txHash
   } catch (error: any) {
-    console.error(`[writeContract] Error submitting transaction:`, error)
+    console.error(`[writeContract] ❌ Error submitting transaction:`, error)
+    console.error(`[writeContract] Error details:`, {
+      message: error?.message,
+      stack: error?.stack,
+      name: error?.name,
+    })
     throw error
   }
 }
 
 export async function waitForTransactionReceipt(
   hash: `0x${string}`, 
-  status: 'FINALIZED' | 'ACCEPTED' = 'FINALIZED',
+  status: 'FINALIZED' | 'ACCEPTED' = 'ACCEPTED',
   options?: { timeout?: number; retries?: number; interval?: number }
 ) {
   const client = getClient()
@@ -81,34 +151,40 @@ export async function waitForTransactionReceipt(
 }
 
 export async function listSymbols(): Promise<string[]> {
-  const response = await readContract('list_symbols')
-  console.log('[listSymbols] Raw response:', response, 'Type:', typeof response, 'IsArray:', Array.isArray(response))
-  
-  if (Array.isArray(response)) {
-    return response
-  }
-  // Handle DynArray/TreeMap serialization (object with numeric or string keys)
-  if (response && typeof response === 'object') {
-    const keys = Object.keys(response)
-    console.log('[listSymbols] Object keys:', keys)
-    // If keys are numeric (0, 1, 2...), it's likely a DynArray
-    const numericKeys = keys.filter(k => /^\d+$/.test(k))
-    if (numericKeys.length > 0) {
-      const result = numericKeys
-        .map(k => parseInt(k, 10))
-        .sort((a, b) => a - b)
-        .map(k => response[k])
-        .filter(Boolean)
-      console.log('[listSymbols] Parsed from numeric keys:', result)
+  try {
+    const response = await readContract('list_symbols', [])
+    console.log('[listSymbols] Raw response:', response, 'Type:', typeof response, 'IsArray:', Array.isArray(response))
+    
+    if (Array.isArray(response)) {
+      console.log(`[listSymbols] ✅ Returned ${response.length} symbols as array:`, response)
+      return response
+    }
+    // Handle DynArray/TreeMap serialization (object with numeric or string keys)
+    if (response && typeof response === 'object') {
+      const keys = Object.keys(response)
+      console.log('[listSymbols] Object keys:', keys, 'Total keys:', keys.length)
+      // If keys are numeric (0, 1, 2...), it's likely a DynArray
+      const numericKeys = keys.filter(k => /^\d+$/.test(k))
+      if (numericKeys.length > 0) {
+        const result = numericKeys
+          .map(k => parseInt(k, 10))
+          .sort((a, b) => a - b)
+          .map(k => response[k])
+          .filter(Boolean)
+        console.log(`[listSymbols] ✅ Parsed ${result.length} symbols from numeric keys:`, result)
+        return result
+      }
+      // Otherwise, treat keys as symbol names (TreeMap case)
+      const result = keys.filter(key => key !== 'length' && !key.startsWith('_'))
+      console.log(`[listSymbols] ✅ Parsed ${result.length} symbols from string keys:`, result)
       return result
     }
-    // Otherwise, treat keys as symbol names (TreeMap case)
-    const result = keys.filter(key => key !== 'length' && !key.startsWith('_'))
-    console.log('[listSymbols] Parsed from string keys:', result)
-    return result
+    console.warn('[listSymbols] ⚠️ Unexpected response format, returning empty array. Response:', response)
+    return []
+  } catch (error: any) {
+    console.error('[listSymbols] ❌ Error reading symbols from contract:', error)
+    throw error
   }
-  console.warn('[listSymbols] Unexpected response format, returning empty array')
-  return []
 }
 
 export async function fetchLatestPrediction(symbol: string) {
@@ -127,6 +203,16 @@ export async function fetchPredictionHistory(symbol: string, limit = 10) {
   return Array.isArray(response) ? response : []
 }
 
+export async function fetchPredictionHistoryByTimeframe(symbol: string, timeframe: string, limit = 10) {
+  try {
+    const response = await readContract('get_prediction_history_by_timeframe', [symbol, timeframe, limit])
+    return Array.isArray(response) ? response : []
+  } catch (error: any) {
+    console.error(`[fetchPredictionHistoryByTimeframe] Error for ${symbol} ${timeframe}:`, error)
+    throw error
+  }
+}
+
 export async function fetchSymbolConfig(symbol: string) {
   return readContract('get_symbol_config', [symbol])
 }
@@ -134,10 +220,11 @@ export async function fetchSymbolConfig(symbol: string) {
 export async function addSymbol(
   account: Account | Address | undefined,
   { symbol, description }: { symbol: string; description: string },
-  provider?: any
+  provider?: any,
+  useLocalAccount: boolean = true // Use local account by default for faster transactions
 ) {
   try {
-    const tx = await writeContract(account, 'add_symbol', [symbol, description], 0n, provider)
+    const tx = await writeContract(account, 'add_symbol', [symbol, description], 0n, provider, useLocalAccount)
     console.log(`Add symbol transaction submitted: ${tx}`)
     
     // Wait for transaction with increased timeout and retries
@@ -177,23 +264,34 @@ export async function requestSymbolUpdate(
 export async function requestSymbolUpdateAllTimeframes(
   account: Account | Address | undefined,
   { symbol, contextJson }: { symbol: string; contextJson: string },
-  provider?: any
+  provider?: any,
+  useLocalAccount: boolean = true // Use local account by default for faster transactions
 ): Promise<Array<{ timeframe: Timeframe; txHash: string; success: boolean; error?: string }>> {
   console.log(`[requestSymbolUpdateAllTimeframes] Starting submission for ${symbol} across ${TIMEFRAMES.length} timeframes`)
   
-  // Attach signer once before submitting all transactions
-  const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
-  if (!signer) {
-    throw new Error('No account/signer provided')
-  }
-  if (!provider) {
-    throw new Error('No provider provided. Please connect your wallet.')
-  }
-  
-  // Attach signer once for all transactions
-  attachSigner(provider, signer)
-  const client = getClient()
   const address = getContractAddress()
+  let client: ReturnType<typeof import('./glClient').getClient>
+  
+  // Use local account (private key) for automatic signing - faster, no user approval needed
+  if (useLocalAccount) {
+    const { getLocalClient } = await import('./glClient')
+    client = getLocalClient()
+    console.log('[requestSymbolUpdateAllTimeframes] Using local account for automatic signing (no approval needed)')
+  } else {
+    // Fallback to MetaMask if explicitly requested
+    const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
+    if (!signer) {
+      throw new Error('No account/signer provided')
+    }
+    if (!provider) {
+      throw new Error('No provider provided. Please connect your wallet.')
+    }
+    
+    // Attach signer once for all transactions
+    attachSigner(provider, signer)
+    client = getClient()
+    console.log('[requestSymbolUpdateAllTimeframes] Using MetaMask wallet (requires user approval)')
+  }
   
   // Submit all timeframes in parallel for faster submission
   // Each submission is independent, so we can do them concurrently
@@ -212,6 +310,15 @@ export async function requestSymbolUpdateAllTimeframes(
       
       const elapsed = Date.now() - startTime
       console.log(`[requestSymbolUpdateAllTimeframes] ${timeframe} submitted in ${elapsed}ms: ${tx}`)
+      
+      // Track transaction for status monitoring
+      try {
+        const { trackTransactionGlobal } = await import('./transactionTrackerCore')
+        trackTransactionGlobal(tx, 'request_update', [symbol, contextJson, timeframe])
+      } catch (trackError) {
+        // Don't fail if tracking fails
+        console.warn('[requestSymbolUpdateAllTimeframes] Failed to track transaction:', trackError)
+      }
       
       return {
         timeframe,
