@@ -46,27 +46,25 @@ export function attachSigner(provider?: EIP1193Provider, address?: `0x${string}`
   // 
   // However, when using wagmi's walletClient, the provider object may be a wrapper
   // around window.ethereum. The SDK needs window.ethereum to be directly accessible.
-  // 
-  // IMPORTANT: GenLayerJS SDK expects window.ethereum to be available for signing.
-  // If we're using wagmi's provider wrapper, we need to ensure window.ethereum is set.
   const clientConfig: any = {
     chain: studionet,
     endpoint: resolveEndpoint(),
     account: address, // String address for MetaMask signing
   }
   
-  // If provider is provided from wagmi, it should be using window.ethereum under the hood
-  // But GenLayerJS SDK may need direct access to window.ethereum
-  // Let's ensure window.ethereum is available
-  if (typeof window !== 'undefined') {
-    // If provider is provided and has request method, it's likely from wagmi
-    // wagmi's walletClient.request should delegate to window.ethereum
-    // But GenLayerJS SDK may need direct access, so we ensure window.ethereum exists
-    if (provider && typeof provider.request === 'function') {
-      // wagmi's provider is a wrapper - the actual provider should be window.ethereum
-      // GenLayerJS SDK will auto-detect window.ethereum when account is a string
-      console.log('[attachSigner] Creating client with address for MetaMask signing')
-      console.log('[attachSigner] SDK will auto-detect window.ethereum for signing')
+  // Include provider in clientConfig if provided
+  if (provider) {
+    clientConfig.provider = provider
+  }
+  
+  // Fallback: ensure window.ethereum is available if SDK truly requires a global
+  // This is gated behind typeof window check and provider existence
+  if (typeof window !== 'undefined' && provider && typeof provider.request === 'function') {
+    // If SDK requires window.ethereum as a global, set it as fallback
+    // Note: GenLayerJS SDK should work with provider in config, but this is a safety net
+    if (!(window as any).ethereum && provider) {
+      console.log('[attachSigner] Setting window.ethereum as fallback for SDK compatibility')
+      ;(window as any).ethereum = provider
     }
   }
   
@@ -78,19 +76,40 @@ export function attachSigner(provider?: EIP1193Provider, address?: `0x${string}`
   // For now, we'll skip it and let the SDK handle it automatically if needed
 }
 
+/**
+ * Delete local account (private key) from localStorage and clear caches
+ * This removes the persisted private key and resets in-memory caches
+ */
+export function deleteLocalAccount() {
+  if (typeof window === 'undefined') return
+  
+  const STORAGE_KEY = 'genlayer_local_account_private_key'
+  localStorage.removeItem(STORAGE_KEY)
+  cachedLocalAccount = null
+  cachedLocalClient = null
+  console.log('[glClient] Local account deleted from storage and cache cleared')
+}
+
 // Clear cache (useful for testing or when provider changes)
 export function clearClientCache() {
   cachedClient = null
   cachedProvider = undefined
   cachedAddress = undefined
+  
+  // Also clear local account cache and storage
+  deleteLocalAccount()
 }
 
 /**
  * Get or create local account (private key) for automatic transaction signing
- * This account is created automatically when the app loads and stored in localStorage
- * It's used for write operations (add symbol, submit prediction) to avoid MetaMask approval
+ * This account is stored in localStorage (unencrypted) and used for write operations
+ * 
+ * SECURITY WARNING: Private key is stored unencrypted in localStorage.
+ * For production, implement passphrase-based encryption (see README).
+ * 
+ * @param requireConsent - If true, will throw if user hasn't consented (UI should handle consent first)
  */
-function getOrCreateLocalAccount(): Account {
+function getOrCreateLocalAccount(requireConsent: boolean = false): Account {
   if (cachedLocalAccount) {
     return cachedLocalAccount
   }
@@ -100,15 +119,25 @@ function getOrCreateLocalAccount(): Account {
   }
 
   const STORAGE_KEY = 'genlayer_local_account_private_key'
+  const CONSENT_KEY = 'genlayer_local_account_consent_given'
   let privateKey = localStorage.getItem(STORAGE_KEY)
 
   if (!privateKey) {
-    // Generate new private key automatically
+    // Check if user has consented (if consent is required)
+    if (requireConsent) {
+      const hasConsented = localStorage.getItem(CONSENT_KEY) === 'true'
+      if (!hasConsented) {
+        throw new Error('User consent required before creating local account. Please show consent UI first.')
+      }
+    }
+    
+    // Generate new private key
     privateKey = generatePrivateKey()
     localStorage.setItem(STORAGE_KEY, privateKey)
-    console.log('[glClient] Auto-generated local account private key')
+    localStorage.setItem(CONSENT_KEY, 'true') // Mark consent as given
+    console.log('[glClient] Generated new local account private key (user consent given)')
     
-    // Dispatch event for UI to show account address (optional)
+    // Dispatch event for UI to show account address
     if (typeof window !== 'undefined') {
       const account = createAccount(privateKey as `0x${string}`)
       window.dispatchEvent(new CustomEvent('localAccountCreated', { 
@@ -125,13 +154,15 @@ function getOrCreateLocalAccount(): Account {
 /**
  * Get client with local account (private key) for write operations
  * This is faster than MetaMask because it doesn't require user approval
+ * 
+ * @param requireConsent - If true, will throw if user hasn't consented
  */
-export function getLocalClient() {
+export function getLocalClient(requireConsent: boolean = false) {
   if (cachedLocalClient && cachedLocalAccount) {
     return cachedLocalClient
   }
 
-  const account = getOrCreateLocalAccount()
+  const account = getOrCreateLocalAccount(requireConsent)
   
   cachedLocalClient = createClient({
     chain: studionet,
@@ -145,10 +176,33 @@ export function getLocalClient() {
 
 /**
  * Get local account address (for display in UI)
+ * This will create the account if it doesn't exist (with consent check)
  */
-export function getLocalAccountAddress(): `0x${string}` {
-  const account = getOrCreateLocalAccount()
+export function getLocalAccountAddress(requireConsent: boolean = false): `0x${string}` {
+  const account = getOrCreateLocalAccount(requireConsent)
   return account.address as `0x${string}`
+}
+
+/**
+ * Check if user has consented to local account creation
+ */
+export function hasLocalAccountConsent(): boolean {
+  if (typeof window === 'undefined') return false
+  return localStorage.getItem('genlayer_local_account_consent_given') === 'true'
+}
+
+/**
+ * Mark user consent for local account creation
+ */
+export function setLocalAccountConsent(consented: boolean) {
+  if (typeof window === 'undefined') return
+  if (consented) {
+    localStorage.setItem('genlayer_local_account_consent_given', 'true')
+  } else {
+    localStorage.removeItem('genlayer_local_account_consent_given')
+    // Also delete the account if consent is revoked
+    deleteLocalAccount()
+  }
 }
 
 /**

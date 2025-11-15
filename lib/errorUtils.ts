@@ -10,15 +10,44 @@ export interface ErrorInfo {
 }
 
 export function parseError(error: any): ErrorInfo {
-  const errorMessage = error?.message || String(error) || 'An unknown error occurred'
+  // Early guard for null/undefined
+  if (error == null) {
+    return {
+      message: 'An unknown error occurred',
+      suggestion: 'An unexpected error occurred. Please try again. If the problem persists, check the console for more details.',
+      category: 'unknown',
+      retryable: true,
+    }
+  }
+
+  const errorMessage = error?.message ?? String(error) ?? 'An unknown error occurred'
   const errorString = errorMessage.toLowerCase()
 
-  // Network errors
+  // Transaction timeout (check BEFORE network errors to avoid false positives)
+  // Narrow to GenLayer-specific phrases to avoid matching generic network timeouts
+  if (
+    errorString.includes('not accepted') ||
+    errorString.includes('not yet accepted') ||
+    errorString.includes('still processing') ||
+    (errorString.includes('timeout') && (
+      errorString.includes('transaction') ||
+      errorString.includes('not accepted') ||
+      errorString.includes('still processing')
+    ))
+  ) {
+    return {
+      message: 'Transaction is processing',
+      suggestion: 'Your transaction has been submitted but is still being processed by the network. This is normal and may take a few moments. Please wait and refresh the page.',
+      category: 'network',
+      retryable: false,
+    }
+  }
+
+  // Network errors (timeout removed to avoid conflict with transaction timeout)
   if (
     errorString.includes('network') ||
     errorString.includes('fetch') ||
     errorString.includes('econnrefused') ||
-    errorString.includes('timeout') ||
     errorString.includes('failed to fetch') ||
     errorString.includes('networkerror')
   ) {
@@ -96,20 +125,6 @@ export function parseError(error: any): ErrorInfo {
     }
   }
 
-  // Transaction timeout (not really an error, but needs special handling)
-  if (
-    errorString.includes('not accepted') ||
-    errorString.includes('not yet accepted') ||
-    errorString.includes('timeout') ||
-    errorString.includes('still processing')
-  ) {
-    return {
-      message: 'Transaction is processing',
-      suggestion: 'Your transaction has been submitted but is still being processed by the network. This is normal and may take a few moments. Please wait and refresh the page.',
-      category: 'network',
-      retryable: false,
-    }
-  }
 
   // Default unknown error
   return {

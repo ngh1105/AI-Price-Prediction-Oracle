@@ -86,18 +86,43 @@ export function getClientWithPrivateKey() {
 
 /**
  * Export private key for backup (should be encrypted in production)
+ * 
+ * SECURITY WARNING: This returns the raw, unencrypted private key.
+ * In production, implement passphrase-based encryption before export.
+ * 
+ * @param requireConfirmation - If true, requires user confirmation via confirm() dialog
  */
-export function exportPrivateKey(): string {
+export function exportPrivateKey(requireConfirmation: boolean = true): string {
   if (typeof window === 'undefined') {
     throw new Error('Private key export only available in browser')
   }
+  
+  if (requireConfirmation) {
+    const confirmed = window.confirm(
+      '⚠️ SECURITY WARNING\n\n' +
+      'You are about to export your unencrypted private key.\n\n' +
+      'This is a HOT WALLET key stored in your browser.\n' +
+      'Anyone with access to this key can control your account.\n\n' +
+      'Do you want to continue?'
+    )
+    if (!confirmed) {
+      throw new Error('Private key export cancelled by user')
+    }
+  }
+  
   return getOrCreatePrivateKey()
 }
 
 /**
  * Import private key from backup
+ * 
+ * SECURITY WARNING: This stores the private key unencrypted in localStorage.
+ * In production, implement passphrase-based encryption before import.
+ * 
+ * @param privateKey - The private key to import
+ * @param requireConfirmation - If true, requires user confirmation via confirm() dialog
  */
-export function importPrivateKey(privateKey: string): void {
+export function importPrivateKey(privateKey: string, requireConfirmation: boolean = true): void {
   if (typeof window === 'undefined') {
     throw new Error('Private key import only available in browser')
   }
@@ -108,11 +133,26 @@ export function importPrivateKey(privateKey: string): void {
   }
 
   // Test if private key is valid by creating account
+  let testAccount: Account
   try {
-    const testAccount = createAccount(privateKey)
+    testAccount = createAccount(privateKey as `0x${string}`)
     console.log('[glClientPrivateKey] Valid private key, address:', testAccount.address)
   } catch (error) {
     throw new Error('Invalid private key: ' + (error as Error).message)
+  }
+
+  if (requireConfirmation) {
+    const confirmed = window.confirm(
+      '⚠️ SECURITY WARNING\n\n' +
+      'You are about to import a private key into this browser.\n\n' +
+      'This will store the key UNENCRYPTED in localStorage.\n' +
+      'Anyone with access to this browser can control the account.\n\n' +
+      'Account address: ' + testAccount.address + '\n\n' +
+      'Do you want to continue?'
+    )
+    if (!confirmed) {
+      throw new Error('Private key import cancelled by user')
+    }
   }
 
   // Store private key
@@ -126,12 +166,32 @@ export function importPrivateKey(privateKey: string): void {
   console.log('[glClientPrivateKey] Private key imported successfully')
 }
 
+// TODO: Implement optional production encryption (password or WebCrypto)
+// This should encrypt the private key before storing in localStorage
+// and decrypt it when needed for signing operations
+// Config flag: ENABLE_PRIVATE_KEY_ENCRYPTION (default: false)
+
 /**
- * Clear private key and client cache
+ * Clear private key and client cache (in-memory only)
+ * Note: This does NOT remove the private key from localStorage.
+ * Use clearStoredPrivateKey() to also remove from storage.
  */
 export function clearPrivateKeyCache() {
   cachedClient = null
   cachedAccount = null
+}
+
+/**
+ * Clear stored private key from localStorage and clear caches
+ * This completely removes the private key from storage
+ */
+export function clearStoredPrivateKey() {
+  if (typeof window === 'undefined') return
+  
+  const STORAGE_KEY = 'genlayer_app_private_key'
+  localStorage.removeItem(STORAGE_KEY)
+  clearPrivateKeyCache()
+  console.log('[glClientPrivateKey] Stored private key removed from localStorage')
 }
 
 /**

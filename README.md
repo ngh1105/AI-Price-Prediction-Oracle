@@ -112,6 +112,21 @@ AI Price Prediction Oracle is a decentralized prediction system that leverages *
 - **GenLayer Account** and API access
 - **Wallet** (MetaMask, WalletConnect, etc.) - Optional, local account auto-created for faster transactions
 
+### ⚠️ Security Notice: Local Account Storage
+
+The app uses a **local account (private key)** stored in browser `localStorage` for faster transactions. 
+
+**Important Security Considerations:**
+- Private key is stored **UNENCRYPTED** in `localStorage`
+- This is a **HOT WALLET** - anyone with browser access can control the account
+- **Recommended for development/testing only**
+- For production, either:
+  - Use MetaMask wallet (more secure)
+  - Implement passphrase-based encryption (see TODO in code)
+  - Use hardware wallet integration
+
+**User Consent:** The app will prompt for consent before creating a local account. You can decline and use MetaMask instead.
+
 ### 1. Clone Repository
 
 ```bash

@@ -58,16 +58,18 @@ async function pollTransactionStatus(hash: string, maxAttempts = 40) {
   const pollInterval = 3000 // 3 seconds
 
   const poll = async () => {
+    // Increment attempts BEFORE checking maxAttempts to ensure proper counting
+    attempts++
+
+    // Check max attempts AFTER incrementing (both success and error paths need this check)
     if (attempts >= maxAttempts) {
       const existing = transactionStore.get(hash)
       if (existing && existing.status === 'submitted') {
         // Transaction still pending after max attempts
         updateTransactionStatus(hash, 'pending', 'Transaction is taking longer than expected. It may still be processing.')
       }
-      return
+      return // Stop polling
     }
-
-    attempts++
 
     try {
       // Try to get transaction receipt
@@ -86,19 +88,32 @@ async function pollTransactionStatus(hash: string, maxAttempts = 40) {
             transactionStore.set(hash, { ...existing, ...updates })
             listeners.forEach(listener => listener(transactionStore.get(hash)!))
           }
-          return // Stop polling
+          return // Stop polling on success
+        }
+      }
+      
+      // Receipt not found or status not ACCEPTED/FINALIZED - continue polling
+      if (attempts < maxAttempts) {
+        setTimeout(poll, pollInterval)
+      } else {
+        // Max attempts reached in success path
+        const existing = transactionStore.get(hash)
+        if (existing && existing.status === 'submitted') {
+          updateTransactionStatus(hash, 'pending', 'Transaction is taking longer than expected. It may still be processing.')
         }
       }
     } catch (error: any) {
       // Transaction not found or still processing - continue polling
       if (attempts < maxAttempts) {
         setTimeout(poll, pollInterval)
+      } else {
+        // Max attempts reached in error path
+        const existing = transactionStore.get(hash)
+        if (existing && existing.status === 'submitted') {
+          updateTransactionStatus(hash, 'pending', 'Transaction is taking longer than expected. It may still be processing.')
+        }
       }
-      return
     }
-
-    // Continue polling
-    setTimeout(poll, pollInterval)
   }
 
   // Start polling after initial delay

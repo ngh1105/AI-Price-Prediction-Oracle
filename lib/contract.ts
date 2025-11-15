@@ -41,7 +41,7 @@ export async function writeContract(
 ) {
   try {
     const address = getContractAddress()
-    let client: ReturnType<typeof import('./glClient').getClient>
+    let client: ReturnType<typeof getClient>
     
     // Use local account (private key) for automatic signing - faster, no user approval needed
     if (useLocalAccount) {
@@ -275,7 +275,7 @@ export async function requestSymbolUpdateAllTimeframes(
   console.log(`[requestSymbolUpdateAllTimeframes] Starting submission for ${symbol} across ${TIMEFRAMES.length} timeframes`)
   
   const address = getContractAddress()
-  let client: ReturnType<typeof import('./glClient').getClient>
+  let client: ReturnType<typeof getClient>
   
   // Use local account (private key) for automatic signing - faster, no user approval needed
   if (useLocalAccount) {

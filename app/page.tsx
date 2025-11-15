@@ -6,7 +6,7 @@ import { useAccount, useWalletClient } from 'wagmi'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast, Toaster } from 'sonner'
 import { fetchLatestPrediction, fetchLatestPredictionByTimeframe, listSymbols, requestSymbolUpdate, requestSymbolUpdateAllTimeframes, TIMEFRAMES, type Timeframe } from '@/lib/contract'
-import { getLocalAccountAddress } from '@/lib/glClient'
+import { getLocalAccountAddress, hasLocalAccountConsent, setLocalAccountConsent } from '@/lib/glClient'
 import { PredictionCard, type Prediction } from './components/PredictionCard'
 import { SymbolManagerDialog } from './components/SymbolManagerDialog'
 import { PredictionCardSkeleton } from './components/SkeletonLoader'
@@ -29,15 +29,48 @@ export default function Page() {
   const { data: walletClient } = useWalletClient()
   const { trackTransaction } = useTransactionTracker()
   
-  // Initialize local account on mount (auto-generates private key if needed)
+  // Initialize local account on mount (with user consent)
+  const [localAccountConsentShown, setLocalAccountConsentShown] = useState(false)
+  
   useEffect(() => {
-    try {
-      const localAddress = getLocalAccountAddress()
-      console.log('[Page] Local account initialized:', localAddress)
-    } catch (error) {
-      console.warn('[Page] Failed to initialize local account:', error)
+    // Check if user has already consented
+    if (hasLocalAccountConsent()) {
+      // User has already consented, initialize account
+      try {
+        const localAddress = getLocalAccountAddress()
+        console.log('[Page] Local account initialized:', localAddress)
+      } catch (error) {
+        console.warn('[Page] Failed to initialize local account:', error)
+      }
+    } else if (!localAccountConsentShown) {
+      // Show consent dialog
+      setLocalAccountConsentShown(true)
+      const confirmed = window.confirm(
+        '🔐 Local Account Setup\n\n' +
+        'This app can create a local account (private key) for faster transactions.\n\n' +
+        '⚠️ SECURITY WARNING:\n' +
+        '• Private key will be stored UNENCRYPTED in your browser\n' +
+        '• Anyone with access to this browser can control the account\n' +
+        '• This is a HOT WALLET - use only for testing/development\n\n' +
+        'For production, use MetaMask or implement encryption.\n\n' +
+        'Do you want to create a local account?'
+      )
+      
+      if (confirmed) {
+        setLocalAccountConsent(true)
+        try {
+          const localAddress = getLocalAccountAddress()
+          console.log('[Page] Local account created with user consent:', localAddress)
+          toast.info('Local account created. Transactions will be faster!', { duration: 3000 })
+        } catch (error) {
+          console.warn('[Page] Failed to create local account:', error)
+        }
+      } else {
+        setLocalAccountConsent(false)
+        console.log('[Page] User declined local account creation')
+      }
     }
-  }, [])
+  }, [localAccountConsentShown])
   
   // Setup transaction tracking
   useEffect(() => {
