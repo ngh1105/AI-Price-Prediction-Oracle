@@ -176,7 +176,7 @@ export async function listSymbols(): Promise<string[]> {
     
     if (Array.isArray(response)) {
       console.log(`[listSymbols] ✅ Returned ${response.length} symbols as array:`, response)
-      return response
+      return response as string[]
     }
     // Handle DynArray/TreeMap serialization (object with numeric or string keys)
     if (response && typeof response === 'object') {
@@ -185,10 +185,11 @@ export async function listSymbols(): Promise<string[]> {
       // If keys are numeric (0, 1, 2...), it's likely a DynArray
       const numericKeys = keys.filter(k => /^\d+$/.test(k))
       if (numericKeys.length > 0) {
+        const responseAny = response as any
         const result = numericKeys
           .map(k => parseInt(k, 10))
           .sort((a, b) => a - b)
-          .map(k => response[k])
+          .map(k => responseAny[k])
           .filter(Boolean)
         console.log(`[listSymbols] ✅ Parsed ${result.length} symbols from numeric keys:`, result)
         return result
@@ -416,10 +417,11 @@ export async function fetchAllTimeframePredictions(symbol: string) {
     
     // Convert TreeMap to object
     if (response && typeof response === 'object') {
+      const responseAny = response as any
       const result: Record<string, any> = {}
       for (const tf of TIMEFRAMES) {
-        if (response[tf]) {
-          result[tf] = response[tf]
+        if (responseAny[tf]) {
+          result[tf] = responseAny[tf]
         }
       }
       return result

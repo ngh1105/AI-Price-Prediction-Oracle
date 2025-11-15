@@ -20,10 +20,12 @@ type FormValues = z.infer<typeof schema>
 
 export function SymbolManagerDialog({ 
   provider, 
-  onSymbolAdded 
+  onSymbolAdded,
+  useLocalAccount = false
 }: { 
   provider?: any
-  onSymbolAdded?: (symbol: string) => void 
+  onSymbolAdded?: (symbol: string) => void
+  useLocalAccount?: boolean
 }) {
   const { address } = useAccount()
   const [submitting, setSubmitting] = useState(false)

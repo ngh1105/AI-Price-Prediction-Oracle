@@ -58,7 +58,7 @@ function getOrCreatePrivateKey(): string {
 export function getAccountAddress(): `0x${string}` {
   if (!cachedAccount) {
     const privateKey = getOrCreatePrivateKey()
-    cachedAccount = createAccount(privateKey)
+    cachedAccount = createAccount(privateKey as `0x${string}`)
   }
   return cachedAccount.address as `0x${string}`
 }
@@ -72,7 +72,7 @@ export function getClientWithPrivateKey() {
   }
 
   const privateKey = getOrCreatePrivateKey()
-  cachedAccount = createAccount(privateKey)
+  cachedAccount = createAccount(privateKey as `0x${string}`)
   
   cachedClient = createClient({
     chain: studionet,

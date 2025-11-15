@@ -76,7 +76,7 @@ async function pollTransactionStatus(hash: string, maxAttempts = 40) {
       const receipt = await client.getTransactionReceipt({ hash: hash as any })
       
       if (receipt) {
-        const status = receipt.status
+        const status = receipt.status as any
         if (status === TransactionStatus.ACCEPTED || status === TransactionStatus.FINALIZED) {
           const existing = transactionStore.get(hash)
           if (existing) {

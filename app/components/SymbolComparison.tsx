@@ -60,24 +60,27 @@ export function SymbolComparison() {
             const pred = await fetchLatestPrediction(symbol)
             if (!pred) return null
             
+            // Cast to any to access dynamic properties from contract response
+            const predAny = pred as any
+            
             // Parse data
             let keyEvents: string[] = []
             let sources: string[] = []
             try {
-              if (pred.key_events_json) {
-                keyEvents = typeof pred.key_events_json === 'string' 
-                  ? JSON.parse(pred.key_events_json) 
-                  : (pred.key_events_json as string[])
+              if (predAny.key_events_json) {
+                keyEvents = typeof predAny.key_events_json === 'string' 
+                  ? JSON.parse(predAny.key_events_json) 
+                  : (predAny.key_events_json as string[])
               }
-              if (pred.sources_json) {
-                sources = typeof pred.sources_json === 'string'
-                  ? JSON.parse(pred.sources_json)
-                  : (pred.sources_json as string[])
+              if (predAny.sources_json) {
+                sources = typeof predAny.sources_json === 'string'
+                  ? JSON.parse(predAny.sources_json)
+                  : (predAny.sources_json as string[])
               }
             } catch {}
             
-            const currentPrice = parseCurrentPrice(pred.raw_context as string)
-            const predictedPrice = parsePredictedPrice(pred.predicted_price as string)
+            const currentPrice = parseCurrentPrice(predAny.raw_context as string)
+            const predictedPrice = parsePredictedPrice(predAny.predicted_price as string)
             const priceChange = currentPrice && predictedPrice
               ? ((predictedPrice - currentPrice) / currentPrice) * 100
               : null
@@ -87,9 +90,9 @@ export function SymbolComparison() {
               currentPrice,
               predictedPrice,
               priceChange,
-              outlook: pred.outlook,
-              confidence: typeof pred.confidence === 'string' ? parseInt(pred.confidence, 10) : (pred.confidence || 0),
-              summary: pred.summary,
+              outlook: predAny.outlook,
+              confidence: typeof predAny.confidence === 'string' ? parseInt(predAny.confidence, 10) : (predAny.confidence || 0),
+              summary: predAny.summary,
               keyEvents,
             }
           } catch {

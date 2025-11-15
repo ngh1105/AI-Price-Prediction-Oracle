@@ -166,34 +166,36 @@ export default function Page() {
         let keyEvents: string[] = []
         let sources: string[] = []
         try {
-          if (latest?.key_events_json) {
-            keyEvents = typeof latest.key_events_json === 'string' 
-              ? JSON.parse(latest.key_events_json) 
-              : (latest.key_events_json as string[])
+          const latestAny = latest as any
+          if (latestAny?.key_events_json) {
+            keyEvents = typeof latestAny.key_events_json === 'string' 
+              ? JSON.parse(latestAny.key_events_json) 
+              : (latestAny.key_events_json as string[])
           }
-          if (latest?.sources_json) {
-            sources = typeof latest.sources_json === 'string'
-              ? JSON.parse(latest.sources_json)
-              : (latest.sources_json as string[])
+          if (latestAny?.sources_json) {
+            sources = typeof latestAny.sources_json === 'string'
+              ? JSON.parse(latestAny.sources_json)
+              : (latestAny.sources_json as string[])
           }
         } catch (e) {
           console.warn('Failed to parse key_events or sources:', e)
         }
         
         // Ensure confidence is a number
-        const confidence = typeof latest?.confidence === 'string' 
-          ? parseInt(latest.confidence, 10) 
-          : (latest?.confidence || 0)
+        const latestAny = latest as any
+        const confidence = typeof latestAny?.confidence === 'string' 
+          ? parseInt(latestAny.confidence, 10) 
+          : (latestAny?.confidence || 0)
         
         const result = {
-          ...latest,
-          timeframe: latest?.timeframe || selectedTimeframe, // Include timeframe
+          ...latestAny,
+          timeframe: latestAny?.timeframe || selectedTimeframe, // Include timeframe
           key_events: keyEvents,
           sources: sources,
-          raw_context: latest?.raw_context as string | undefined,
+          raw_context: latestAny?.raw_context as string | undefined,
           confidence: isNaN(confidence) ? 0 : confidence,
           // Map counter to generated_at if generated_at is not present
-          generated_at: latest?.generated_at || parseInt(latest?.counter || '0', 10),
+          generated_at: latestAny?.generated_at || parseInt(latestAny?.counter || '0', 10),
         } as Prediction
         
         // Debug logging
@@ -304,7 +306,8 @@ export default function Page() {
             const prediction = await fetchLatestPredictionByTimeframe(selectedSymbol, testTimeframe)
             
             // Check if prediction exists and has valid data
-            if (prediction && (prediction.predicted_price || prediction.prediction_id)) {
+            const predictionAny = prediction as any
+            if (prediction && (predictionAny.predicted_price || predictionAny.prediction_id)) {
               predictionsVerified = true
               console.log(`✅ Predictions verified on-chain for ${selectedSymbol} after ${attempt + 1} attempts (${(attempt + 1) * pollInterval / 1000}s)`)
               break
