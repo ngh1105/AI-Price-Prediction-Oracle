@@ -123,7 +123,7 @@ export function SymbolManagerDialog({
         const results = await requestSymbolUpdateAllTimeframes(address, {
           symbol: symbolUpper,
           contextJson: contextJson,
-        }, provider)
+        }, provider, useLocalAccount)
         
         const successCount = results.filter(r => r.success).length
         if (successCount > 0) {

@@ -41,7 +41,7 @@ export async function writeContract(
 ) {
   try {
     const address = getContractAddress()
-    let client: ReturnType<typeof getClient>
+    let client: ReturnType<typeof getClient> | undefined
     
     // Use local account (private key) for automatic signing - faster, no user approval needed
     let useLocalAccountFinal = useLocalAccount
@@ -62,7 +62,7 @@ export async function writeContract(
     }
     
     // Fallback to MetaMask if local account not available or not requested
-    if (!useLocalAccountFinal) {
+    if (!client) {
       // Fallback to MetaMask
       const signer = typeof account === 'string' ? (account as Address) : (account?.address as Address | undefined)
       if (!signer) {
