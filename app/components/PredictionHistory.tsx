@@ -1,15 +1,16 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { fetchPredictionHistory } from '@/lib/contract'
+import { fetchPredictionHistory, fetchPredictionHistoryByTimeframe, TIMEFRAMES, TIMEFRAME_LABELS, type Timeframe } from '@/lib/contract'
 import { motion } from 'framer-motion'
 import { Clock, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 type PredictionHistoryProps = {
   symbol: string
   currentPrice: number | null
+  timeframe?: Timeframe // Optional timeframe filter
 }
 
 function parsePredictedPrice(predictedPrice: string): number | null {
@@ -25,13 +26,22 @@ function parsePredictedPrice(predictedPrice: string): number | null {
   return null
 }
 
-export function PredictionHistory({ symbol, currentPrice }: PredictionHistoryProps) {
+export function PredictionHistory({ symbol, currentPrice, timeframe }: PredictionHistoryProps) {
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe | 'all'>(timeframe || 'all')
+  
   const historyQuery = useQuery({
-    queryKey: ['prediction-history', symbol],
+    queryKey: ['prediction-history', symbol, selectedTimeframe],
     queryFn: async () => {
       try {
-        const history = await fetchPredictionHistory(symbol, 20)
-        return Array.isArray(history) ? history : []
+        if (selectedTimeframe === 'all') {
+          // Use legacy method for backward compatibility (defaults to 24h)
+          const history = await fetchPredictionHistory(symbol, 20)
+          return Array.isArray(history) ? history : []
+        } else {
+          // Use timeframe-specific method
+          const history = await fetchPredictionHistoryByTimeframe(symbol, selectedTimeframe, 20)
+          return Array.isArray(history) ? history : []
+        }
       } catch (error) {
         console.error('Failed to fetch prediction history:', error)
         return []
@@ -80,10 +90,28 @@ export function PredictionHistory({ symbol, currentPrice }: PredictionHistoryPro
 
   return (
     <div className="bg-card/80 backdrop-blur-sm border border-card-border/60 rounded-2xl p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <Clock className="h-4 w-4 text-accent" />
-        <h3 className="text-lg font-bold">Prediction History</h3>
-        <span className="text-xs text-muted">({historyWithAccuracy.length} predictions)</span>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-accent" />
+          <h3 className="text-lg font-bold">Prediction History</h3>
+          <span className="text-xs text-muted">({historyWithAccuracy.length} predictions)</span>
+        </div>
+        
+        {/* Timeframe selector */}
+        {!timeframe && (
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedTimeframe}
+              onChange={(e) => setSelectedTimeframe(e.target.value as Timeframe | 'all')}
+              className="bg-card/50 border border-card-border/60 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+            >
+              <option value="all">All Timeframes</option>
+              {TIMEFRAMES.map(tf => (
+                <option key={tf} value={tf}>{TIMEFRAME_LABELS[tf]}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       
       <div className="space-y-3 max-h-96 overflow-y-auto">

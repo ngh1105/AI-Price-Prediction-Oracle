@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { checkRateLimit } from './rate-limit'
 
 const BINANCE_BASE_URLS = [
   'https://api.binance.com',
@@ -274,6 +275,51 @@ async function fetchNews(symbol: string): Promise<any[]> {
 }
 
 export async function GET(request: NextRequest) {
+  // Rate limiting with proper IP detection
+  const forwardedFor = request.headers.get('x-forwarded-for')
+  const realIp = request.headers.get('x-real-ip')
+  const ip = forwardedFor?.split(',')[0]?.trim() || realIp || null
+  
+  let rateLimitKey: string
+  let rateLimitLimit: number
+  let rateLimitStrategy: string
+  
+  if (!ip) {
+    // Strategy C: Use shared bucket key "no-ip" with conservative limit
+    // This ensures rate limiting still works for requests without IP headers
+    // while being more permissive than rejecting all such requests
+    rateLimitKey = 'no-ip'
+    rateLimitLimit = 20 // Conservative limit for requests without IP (lower than default)
+    rateLimitStrategy = 'shared-bucket-no-ip'
+    console.log('[generate-context] Missing client IP headers, using shared "no-ip" bucket with conservative limit (20 req/min)')
+  } else {
+    rateLimitKey = ip
+    rateLimitLimit = 30 // Default limit for requests with IP
+    rateLimitStrategy = 'ip-based'
+  }
+  
+  const rateLimit = checkRateLimit(rateLimitKey, { maxRequests: rateLimitLimit })
+  
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { 
+        error: 'Rate limit exceeded', 
+        message: `Too many requests. Please try again after ${new Date(rateLimit.resetAt).toISOString()}`,
+        resetAt: rateLimit.resetAt,
+      },
+      { 
+        status: 429,
+        headers: {
+          'X-RateLimit-Limit': rateLimit.limit.toString(),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': rateLimit.resetAt.toString(),
+          'Retry-After': Math.ceil((rateLimit.resetAt - Date.now()) / 1000).toString(),
+          'X-RateLimit-Strategy': rateLimitStrategy,
+        },
+      }
+    )
+  }
+
   const searchParams = request.nextUrl.searchParams
   const symbol = searchParams.get('symbol')
 
@@ -345,7 +391,15 @@ export async function GET(request: NextRequest) {
       notes: 'Context includes technical indicators (RSI, MACD, MA, Support/Resistance) and fundamental data (news, trends)',
     }
 
-    return NextResponse.json(context)
+    const response = NextResponse.json(context)
+    
+    // Add rate limit headers (limit matches actual enforcement)
+    response.headers.set('X-RateLimit-Limit', rateLimit.limit.toString())
+    response.headers.set('X-RateLimit-Remaining', rateLimit.remaining.toString())
+    response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toString())
+    response.headers.set('X-RateLimit-Strategy', rateLimitStrategy)
+    
+    return response
   } catch (error: any) {
     console.error('Error generating context:', error)
     return NextResponse.json({ error: error.message || 'Failed to generate context' }, { status: 500 })

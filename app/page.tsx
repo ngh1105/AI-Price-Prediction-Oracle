@@ -6,6 +6,7 @@ import { useAccount, useWalletClient } from 'wagmi'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast, Toaster } from 'sonner'
 import { fetchLatestPrediction, fetchLatestPredictionByTimeframe, listSymbols, requestSymbolUpdate, requestSymbolUpdateAllTimeframes, TIMEFRAMES, type Timeframe } from '@/lib/contract'
+import { getLocalAccountAddress, hasLocalAccountConsent, setLocalAccountConsent } from '@/lib/glClient'
 import { PredictionCard, type Prediction } from './components/PredictionCard'
 import { SymbolManagerDialog } from './components/SymbolManagerDialog'
 import { PredictionCardSkeleton } from './components/SkeletonLoader'
@@ -14,6 +15,11 @@ import { PredictionHistory } from './components/PredictionHistory'
 import { SymbolComparison } from './components/SymbolComparison'
 import { TimeframeSelector } from './components/TimeframeSelector'
 import { MultiTimeframeView } from './components/MultiTimeframeView'
+import { AnalyticsDashboard } from './components/AnalyticsDashboard'
+import { TransactionStatus } from './components/TransactionStatus'
+import { useTransactionTracker } from '@/lib/transactionTracker'
+import { setTransactionTracker } from '@/lib/contract'
+import { formatErrorForToast } from '@/lib/errorUtils'
 import { cn } from '@/lib/utils'
 import { TrendingUp, Sparkles, Activity, History, BarChart3, Clock } from 'lucide-react'
 
@@ -21,6 +27,63 @@ export default function Page() {
   const queryClient = useQueryClient()
   const { address } = useAccount()
   const { data: walletClient } = useWalletClient()
+  const { trackTransaction } = useTransactionTracker()
+  
+  // Initialize local account on mount (with user consent)
+  const [localAccountConsentShown, setLocalAccountConsentShown] = useState(false)
+  // Track whether user wants to use local account (based on consent)
+  const [useLocalAccount, setUseLocalAccount] = useState(() => hasLocalAccountConsent())
+  
+  useEffect(() => {
+    // Check if user has already consented
+    if (hasLocalAccountConsent()) {
+      // User has already consented, initialize account (consent already checked, pass false)
+      setUseLocalAccount(true)
+      try {
+        const localAddress = getLocalAccountAddress(false)
+        console.log('[Page] Local account initialized:', localAddress)
+      } catch (error) {
+        console.warn('[Page] Failed to initialize local account:', error)
+      }
+    } else if (!localAccountConsentShown) {
+      // Show consent dialog
+      setLocalAccountConsentShown(true)
+      const confirmed = window.confirm(
+        '🔐 Local Account Setup\n\n' +
+        'This app can create a local account (private key) for faster transactions.\n\n' +
+        '⚠️ SECURITY WARNING:\n' +
+        '• Private key will be stored UNENCRYPTED in your browser\n' +
+        '• Anyone with access to this browser can control the account\n' +
+        '• This is a HOT WALLET - use only for testing/development\n\n' +
+        'For production, use MetaMask or implement encryption.\n\n' +
+        'Do you want to create a local account?'
+      )
+      
+      if (confirmed) {
+        setLocalAccountConsent(true)
+        setUseLocalAccount(true)
+        try {
+          // Pass true to require consent (which we just obtained)
+          const localAddress = getLocalAccountAddress(true)
+          console.log('[Page] Local account created with user consent:', localAddress)
+          toast.info('Local account created. Transactions will be faster!', { duration: 3000 })
+        } catch (error) {
+          console.warn('[Page] Failed to create local account:', error)
+          setUseLocalAccount(false)
+        }
+      } else {
+        setLocalAccountConsent(false)
+        setUseLocalAccount(false)
+        console.log('[Page] User declined local account creation')
+      }
+    }
+  }, [localAccountConsentShown])
+  
+  // Setup transaction tracking
+  useEffect(() => {
+    setTransactionTracker(trackTransaction)
+  }, [trackTransaction])
+  
   const provider = useMemo(() => {
     if (!walletClient) return undefined
     return {
@@ -80,7 +143,7 @@ export default function Page() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('24h')
-  const [activeTab, setActiveTab] = useState<'prediction' | 'history' | 'comparison' | 'timeframes'>('prediction')
+  const [activeTab, setActiveTab] = useState<'prediction' | 'history' | 'comparison' | 'timeframes' | 'analytics'>('prediction')
 
   useEffect(() => {
     if (!selectedSymbol && symbolsQuery.data && symbolsQuery.data.length > 0) {
@@ -197,7 +260,7 @@ export default function Page() {
       const results = await requestSymbolUpdateAllTimeframes(address, { 
         symbol: selectedSymbol, 
         contextJson: minified 
-      }, provider)
+      }, provider, useLocalAccount)
       
       // Count successes
       const successCount = results.filter(r => r.success).length
@@ -211,7 +274,7 @@ export default function Page() {
         throw new Error(`Failed to submit any predictions. Errors: ${errors}`)
       }
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       if (data.failedCount > 0) {
         toast.warning(`Predictions submitted for ${data.successCount}/6 timeframes. ${data.failedCount} failed.`, {
           duration: 5000,
@@ -221,16 +284,68 @@ export default function Page() {
           duration: 3000,
         })
       }
-      // Invalidate all prediction queries
+      
+      // Poll to verify predictions were added on-chain
+      if (data.successCount > 0 && selectedSymbol) {
+        toast.info(`Verifying predictions on-chain for ${selectedSymbol}...`, {
+          duration: 3000,
+        })
+        
+        let predictionsVerified = false
+        const maxAttempts = 30 // 60 seconds total
+        const pollInterval = 2000 // 2 seconds
+        
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval))
+          
+          try {
+            // Try to fetch predictions for at least one timeframe
+            const testTimeframe = TIMEFRAMES[0] // Check first timeframe
+            const prediction = await fetchLatestPredictionByTimeframe(selectedSymbol, testTimeframe)
+            
+            // Check if prediction exists and has valid data
+            if (prediction && (prediction.predicted_price || prediction.prediction_id)) {
+              predictionsVerified = true
+              console.log(`✅ Predictions verified on-chain for ${selectedSymbol} after ${attempt + 1} attempts (${(attempt + 1) * pollInterval / 1000}s)`)
+              break
+            }
+          } catch (pollError) {
+            console.warn(`[Poll ${attempt + 1}/${maxAttempts}] Failed to verify predictions:`, pollError)
+            // Continue polling even if one attempt fails
+          }
+        }
+        
+        if (predictionsVerified) {
+          toast.success(`Predictions confirmed on-chain for ${selectedSymbol}!`, {
+            duration: 3000,
+          })
+        } else {
+          toast.warning(
+            `Predictions submitted but not yet visible on-chain. They may take a few more moments to process.`,
+            {
+              duration: 10000,
+            }
+          )
+        }
+      }
+      
+      // Invalidate all prediction queries to refresh UI
       queryClient.invalidateQueries({ queryKey: ['prediction'] })
       queryClient.invalidateQueries({ queryKey: ['all-timeframe-predictions', selectedSymbol] })
       generateContext.reset()
     },
     onError: (error: any) => {
       console.error('[requestUpdate] Error:', error)
-      toast.error(error?.message ?? 'Failed to submit predictions', {
-        duration: 8000,
-      })
+      const { title, description } = formatErrorForToast(error)
+      toast.error(
+        <div>
+          <div className="font-semibold">{title}</div>
+          {description && <div className="text-sm mt-1 opacity-90">{description}</div>}
+        </div>,
+        {
+          duration: 10000,
+        }
+      )
     },
   })
 
@@ -262,6 +377,7 @@ export default function Page() {
       </div>
       
       <Toaster richColors position="bottom-right" />
+      <TransactionStatus />
       
       <header className="border-b border-card-border/40 backdrop-blur-xl bg-card/50 sticky top-0 z-40 glass">
         <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between gap-4">
@@ -368,6 +484,18 @@ export default function Page() {
               >
                 <Clock className="h-3.5 w-3.5" />
                 Timeframes
+              </button>
+              <button
+                onClick={() => setActiveTab('analytics')}
+                className={cn(
+                  "px-4 py-2 text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5",
+                  activeTab === 'analytics'
+                    ? "border-accent text-accent"
+                    : "border-transparent text-muted hover:text-foreground"
+                )}
+              >
+                <Activity className="h-3.5 w-3.5" />
+                Analytics
               </button>
             </div>
 
@@ -476,19 +604,25 @@ export default function Page() {
                   </div>
                 )
               )}
+
+              {activeTab === 'analytics' && (
+                <AnalyticsDashboard />
+              )}
             </div>
           </div>
 
           <aside className="space-y-6">
             <SymbolManagerDialog 
-              provider={provider} 
-              onSymbolAdded={(symbol) => {
-                // Refresh symbols list
-                queryClient.invalidateQueries({ queryKey: ['symbols'] })
+              provider={provider}
+              useLocalAccount={useLocalAccount}
+              onSymbolAdded={async (symbol) => {
+                // Force immediate refresh of symbols list
+                await queryClient.refetchQueries({ queryKey: ['symbols'] })
                 // Select the newly added symbol
                 setSelectedSymbol(symbol)
                 // Refresh prediction for the new symbol
                 queryClient.invalidateQueries({ queryKey: ['prediction', symbol] })
+                queryClient.invalidateQueries({ queryKey: ['all-timeframe-predictions', symbol] })
               }}
             />
 

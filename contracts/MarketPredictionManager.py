@@ -76,6 +76,14 @@ class MarketPredictionManager(gl.Contract):
 
         self.symbols[key] = SymbolConfig(description=description, is_active=True)
         self.symbol_counters[key] = u64(0)
+        
+        # Initialize timeframe counters for all timeframes (set to 0)
+        # This ensures the symbol is ready for predictions across all timeframes
+        valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+        for tf in valid_timeframes:
+            tf_key = f"{key}-{tf}"
+            if self.symbol_timeframe_counters.get(tf_key) is None:
+                self.symbol_timeframe_counters[tf_key] = u64(0)
 
     @gl.public.write
     def update_symbol_status(self, symbol: str, is_active: bool) -> None:
@@ -373,13 +381,41 @@ sources should cite URLs or clear identifiers.
 
     @gl.public.view
     def get_prediction_history(self, symbol: str, limit: int = 10) -> typing.List[TreeMap[str, str]]:
+        """
+        Get prediction history for a symbol (legacy method - defaults to 24h timeframe).
+        For timeframe-specific history, use get_prediction_history_by_timeframe instead.
+        """
+        return self.get_prediction_history_by_timeframe(symbol, "24h", limit)
+
+    @gl.public.view
+    def get_prediction_history_by_timeframe(self, symbol: str, timeframe: str, limit: int = 10) -> typing.List[TreeMap[str, str]]:
+        """
+        Get prediction history for a specific symbol and timeframe.
+        
+        Args:
+            symbol: Trading symbol (e.g., 'BTC', 'ETH')
+            timeframe: Prediction timeframe ("1h", "4h", "12h", "24h", "7d", "30d")
+            limit: Maximum number of predictions to return
+        
+        Returns:
+            List of prediction records, ordered from most recent to oldest
+        """
         if limit <= 0:
             raise ValueError("limit must be positive")
 
         key = symbol.upper().strip()
-        counter = int(self.symbol_counters.get(key, u64(0)))
+        tf = timeframe.lower().strip()
+        
+        # Validate timeframe
+        valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+        if tf not in valid_timeframes:
+            raise ValueError(f"invalid timeframe. Must be one of: {valid_timeframes}")
+        
+        tf_key = f"{key}-{tf}"
+        counter = int(self.symbol_timeframe_counters.get(tf_key, u64(0)))
+        
         if counter == 0:
-            raise ValueError("no predictions recorded")
+            raise ValueError(f"no predictions recorded for {symbol} {timeframe}")
 
         max_entries = min(limit, counter, int(self.max_history) if int(self.max_history) > 0 else limit)
 
@@ -388,11 +424,14 @@ sources should cite URLs or clear identifiers.
         collected = 0
 
         while current >= 1 and collected < max_entries:
-            prediction_id = f"{key}-24h-{current}"
+            prediction_id = f"{key}-{tf}-{current}"
             record = self.predictions.get(prediction_id)
-            if record is None:
+            
+            # For 24h timeframe, also check legacy format for backward compatibility
+            if record is None and tf == "24h":
                 legacy_id = f"{key}-{current}"
                 record = self.predictions.get(legacy_id)
+            
             if record is not None:
                 history.append(self._record_to_map(record))
                 collected += 1

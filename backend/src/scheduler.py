@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
 import schedule
@@ -10,7 +11,7 @@ from dotenv import load_dotenv
 
 from .context_builder import build_market_context
 from .tx_sender import (
-  initialise_client,
+  get_cached_client,
   list_registered_symbols,
   submit_prediction_update,
   check_contract_health,
@@ -52,7 +53,8 @@ def run_once():
       'total_timeframes': 0,
     }
     
-    client, contract_address, account = initialise_client()
+    # Use cached client for better performance
+    client, contract_address, account = get_cached_client()
     
     # Health check before proceeding
     if not check_contract_health(client, contract_address):
@@ -111,21 +113,28 @@ def run_once():
           pass  # If context is not valid JSON, let contract handle it
         
         symbol_success = True
-        # Generate predictions for ALL timeframes
-        for timeframe in TIMEFRAMES:
-          try:
-            logging.info('Submitting %s prediction for %s', timeframe, symbol)
-            tx_hash, _ = submit_prediction_update(client, contract_address, symbol, context, timeframe)
-            logging.info('Update submitted for %s %s (tx %s)', symbol, timeframe, tx_hash)
-            summary['timeframes_submitted'] += 1
-            
-            # Small delay between timeframes to avoid rate limits
-            if timeframe != TIMEFRAMES[-1]:
-              time.sleep(2)  # 2 second delay between timeframes
-          except Exception as error:
-            logging.exception('Failed to submit %s prediction for %s: %s', timeframe, symbol, error)
-            summary['timeframes_failed'] += 1
-            symbol_success = False
+        # Generate predictions for ALL timeframes in parallel (with rate limiting)
+        # Use ThreadPoolExecutor to submit timeframes concurrently
+        max_workers = min(3, len(TIMEFRAMES))  # Limit concurrent submissions to avoid rate limits
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+          # Submit all timeframes
+          future_to_timeframe = {
+            executor.submit(submit_prediction_update, client, contract_address, symbol, context, tf): tf
+            for tf in TIMEFRAMES
+          }
+          
+          # Process results as they complete
+          for future in as_completed(future_to_timeframe):
+            timeframe = future_to_timeframe[future]
+            try:
+              tx_hash, _ = future.result()
+              logging.info('Update submitted for %s %s (tx %s)', symbol, timeframe, tx_hash)
+              summary['timeframes_submitted'] += 1
+            except Exception as error:
+              logging.exception('Failed to submit %s prediction for %s: %s', timeframe, symbol, error)
+              summary['timeframes_failed'] += 1
+              symbol_success = False
         
         if symbol_success:
           summary['symbols_processed'] += 1

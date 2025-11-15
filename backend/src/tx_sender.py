@@ -1,7 +1,9 @@
 import json
 import logging
 import os
-from typing import Iterable, List, Tuple
+import threading
+import time
+from typing import Iterable, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from genlayer_py import create_account, create_client
@@ -12,6 +14,12 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Client caching for reuse
+_client_cache: Optional[Tuple] = None
+_client_cache_timestamp: Optional[float] = None
+_client_cache_lock = threading.Lock()
+CLIENT_CACHE_TTL = 300  # 5 minutes cache TTL
+
 
 def _resolve_chain():
     rpc_url = os.getenv('GENLAYER_RPC_URL')
@@ -21,6 +29,12 @@ def _resolve_chain():
 
 
 def initialise_client():
+    """
+    Initialize a new GenLayer client. For better performance, use get_cached_client() instead.
+    
+    Returns:
+        Tuple of (client, contract_address, account)
+    """
     private_key = os.getenv('PRIVATE_KEY')
     if not private_key:
         raise RuntimeError('PRIVATE_KEY missing from environment')
@@ -35,6 +49,45 @@ def initialise_client():
     if not contract_address:
         raise RuntimeError('CONTRACT_ADDRESS missing from environment')
     return client, contract_address, account
+
+
+def get_cached_client():
+    """
+    Get a cached client instance, creating a new one if cache is expired or missing.
+    This reduces overhead from creating new clients on every scheduler run.
+    
+    Returns:
+        Tuple of (client, contract_address, account)
+    """
+    global _client_cache, _client_cache_timestamp
+    
+    with _client_cache_lock:
+        current_time = time.time()
+        
+        # Check if cache is valid
+        if (_client_cache is not None and 
+            _client_cache_timestamp is not None and 
+            current_time - _client_cache_timestamp < CLIENT_CACHE_TTL):
+            logger.debug(f"Using cached client (age: {current_time - _client_cache_timestamp:.1f}s)")
+            return _client_cache
+        
+        # Create new client
+        logger.info("Creating new client instance (cache expired or missing)")
+        _client_cache = initialise_client()
+        _client_cache_timestamp = current_time
+        return _client_cache
+
+
+def clear_client_cache():
+    """
+    Clear the client cache. Useful for testing or when credentials change.
+    """
+    global _client_cache, _client_cache_timestamp
+    
+    with _client_cache_lock:
+        _client_cache = None
+        _client_cache_timestamp = None
+        logger.info("Client cache cleared")
 
 
 def _normalise_symbol_list(raw: Iterable) -> List[str]:
