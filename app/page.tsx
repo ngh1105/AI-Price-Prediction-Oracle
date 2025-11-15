@@ -35,9 +35,9 @@ export default function Page() {
   useEffect(() => {
     // Check if user has already consented
     if (hasLocalAccountConsent()) {
-      // User has already consented, initialize account
+      // User has already consented, initialize account (consent already checked, pass false)
       try {
-        const localAddress = getLocalAccountAddress()
+        const localAddress = getLocalAccountAddress(false)
         console.log('[Page] Local account initialized:', localAddress)
       } catch (error) {
         console.warn('[Page] Failed to initialize local account:', error)
@@ -59,7 +59,8 @@ export default function Page() {
       if (confirmed) {
         setLocalAccountConsent(true)
         try {
-          const localAddress = getLocalAccountAddress()
+          // Pass true to require consent (which we just obtained)
+          const localAddress = getLocalAccountAddress(true)
           console.log('[Page] Local account created with user consent:', localAddress)
           toast.info('Local account created. Transactions will be faster!', { duration: 3000 })
         } catch (error) {

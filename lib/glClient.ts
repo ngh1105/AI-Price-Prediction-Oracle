@@ -129,13 +129,20 @@ function getOrCreateLocalAccount(requireConsent: boolean = false): Account {
       if (!hasConsented) {
         throw new Error('User consent required before creating local account. Please show consent UI first.')
       }
+      // Only set consent key when consent was explicitly required and obtained
+      // This ensures we only mark consent when it was actually checked
+      localStorage.setItem(CONSENT_KEY, 'true')
     }
     
     // Generate new private key
     privateKey = generatePrivateKey()
     localStorage.setItem(STORAGE_KEY, privateKey)
-    localStorage.setItem(CONSENT_KEY, 'true') // Mark consent as given
-    console.log('[glClient] Generated new local account private key (user consent given)')
+    
+    if (requireConsent) {
+      console.log('[glClient] Generated new local account private key (user consent explicitly given)')
+    } else {
+      console.warn('[glClient] Generated new local account private key WITHOUT explicit consent (requireConsent=false)')
+    }
     
     // Dispatch event for UI to show account address
     if (typeof window !== 'undefined') {
@@ -155,9 +162,10 @@ function getOrCreateLocalAccount(requireConsent: boolean = false): Account {
  * Get client with local account (private key) for write operations
  * This is faster than MetaMask because it doesn't require user approval
  * 
- * @param requireConsent - If true, will throw if user hasn't consented
+ * @param requireConsent - If true (default), will throw if user hasn't consented
+ *                         Pass false explicitly to allow silent creation (not recommended)
  */
-export function getLocalClient(requireConsent: boolean = false) {
+export function getLocalClient(requireConsent: boolean = true) {
   if (cachedLocalClient && cachedLocalAccount) {
     return cachedLocalClient
   }
@@ -177,8 +185,11 @@ export function getLocalClient(requireConsent: boolean = false) {
 /**
  * Get local account address (for display in UI)
  * This will create the account if it doesn't exist (with consent check)
+ * 
+ * @param requireConsent - If true (default), will throw if user hasn't consented
+ *                         Pass false explicitly to allow silent creation (not recommended)
  */
-export function getLocalAccountAddress(requireConsent: boolean = false): `0x${string}` {
+export function getLocalAccountAddress(requireConsent: boolean = true): `0x${string}` {
   const account = getOrCreateLocalAccount(requireConsent)
   return account.address as `0x${string}`
 }

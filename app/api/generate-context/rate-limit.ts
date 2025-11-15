@@ -11,11 +11,21 @@ interface RateLimitStore {
 const rateLimitStore = new Map<string, RateLimitStore>()
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000 // 1 minute
-const MAX_REQUESTS_PER_WINDOW = 30 // 30 requests per minute per IP
+const DEFAULT_MAX_REQUESTS_PER_WINDOW = 30 // Default: 30 requests per minute per IP
 
-export function checkRateLimit(identifier: string): { allowed: boolean; remaining: number; resetAt: number } {
+export interface RateLimitOptions {
+  maxRequests?: number
+  windowMs?: number
+}
+
+export function checkRateLimit(
+  identifier: string,
+  options: RateLimitOptions = {}
+): { allowed: boolean; remaining: number; resetAt: number; limit: number } {
   const now = Date.now()
   const key = identifier
+  const maxRequests = options.maxRequests ?? DEFAULT_MAX_REQUESTS_PER_WINDOW
+  const windowMs = options.windowMs ?? RATE_LIMIT_WINDOW_MS
 
   let store = rateLimitStore.get(key)
 
@@ -29,17 +39,18 @@ export function checkRateLimit(identifier: string): { allowed: boolean; remainin
   if (!store) {
     store = {
       count: 0,
-      resetTime: now + RATE_LIMIT_WINDOW_MS,
+      resetTime: now + windowMs,
     }
     rateLimitStore.set(key, store)
   }
 
   // Check if limit exceeded
-  if (store.count >= MAX_REQUESTS_PER_WINDOW) {
+  if (store.count >= maxRequests) {
     return {
       allowed: false,
       remaining: 0,
       resetAt: store.resetTime,
+      limit: maxRequests,
     }
   }
 
@@ -48,8 +59,9 @@ export function checkRateLimit(identifier: string): { allowed: boolean; remainin
 
   return {
     allowed: true,
-    remaining: MAX_REQUESTS_PER_WINDOW - store.count,
+    remaining: maxRequests - store.count,
     resetAt: store.resetTime,
+    limit: maxRequests,
   }
 }
 

@@ -46,7 +46,9 @@ export async function writeContract(
     // Use local account (private key) for automatic signing - faster, no user approval needed
     if (useLocalAccount) {
       const { getLocalClient } = await import('./glClient')
-      client = getLocalClient()
+      // Pass false to allow silent creation if account already exists
+      // Note: Account creation should have been handled by consent UI in app/page.tsx
+      client = getLocalClient(false)
       console.log('[writeContract] Using local account for automatic signing (no approval needed)')
     } else {
       // Fallback to MetaMask if explicitly requested
@@ -71,9 +73,9 @@ export async function writeContract(
       console.log('[writeContract] Using MetaMask wallet (requires user approval)')
     }
     
-    const accountAddress = useLocalAccount 
-      ? (await import('./glClient')).getLocalAccountAddress()
-      : (typeof account === 'string' ? account : account?.address)
+                const accountAddress = useLocalAccount 
+                  ? (await import('./glClient')).getLocalAccountAddress(false) // Account should already exist
+                  : (typeof account === 'string' ? account : account?.address)
     
     console.log(`[writeContract] Submitting ${functionName} to ${address}`, {
       functionName,
@@ -280,7 +282,9 @@ export async function requestSymbolUpdateAllTimeframes(
   // Use local account (private key) for automatic signing - faster, no user approval needed
   if (useLocalAccount) {
     const { getLocalClient } = await import('./glClient')
-    client = getLocalClient()
+    // Pass false to allow silent creation if account already exists
+    // Note: Account creation should have been handled by consent UI in app/page.tsx
+    client = getLocalClient(false)
     console.log('[requestSymbolUpdateAllTimeframes] Using local account for automatic signing (no approval needed)')
   } else {
     // Fallback to MetaMask if explicitly requested

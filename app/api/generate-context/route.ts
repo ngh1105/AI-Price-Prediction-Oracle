@@ -281,22 +281,24 @@ export async function GET(request: NextRequest) {
   const ip = forwardedFor?.split(',')[0]?.trim() || realIp || null
   
   let rateLimitKey: string
-  let isGeneratedId = false
-  let rateLimitLimit = '30' // Default limit
+  let rateLimitLimit: number
+  let rateLimitStrategy: string
   
   if (!ip) {
-    // Generate per-request UUID for requests without IP headers
-    // Use a more permissive limit for these requests
-    const { randomUUID } = await import('crypto')
-    rateLimitKey = `session-${randomUUID()}`
-    isGeneratedId = true
-    rateLimitLimit = '60' // Higher limit for session-based requests
-    console.warn('[generate-context] Missing client IP headers, using generated session ID for rate limiting:', rateLimitKey)
+    // Strategy C: Use shared bucket key "no-ip" with conservative limit
+    // This ensures rate limiting still works for requests without IP headers
+    // while being more permissive than rejecting all such requests
+    rateLimitKey = 'no-ip'
+    rateLimitLimit = 20 // Conservative limit for requests without IP (lower than default)
+    rateLimitStrategy = 'shared-bucket-no-ip'
+    console.log('[generate-context] Missing client IP headers, using shared "no-ip" bucket with conservative limit (20 req/min)')
   } else {
     rateLimitKey = ip
+    rateLimitLimit = 30 // Default limit for requests with IP
+    rateLimitStrategy = 'ip-based'
   }
   
-  const rateLimit = checkRateLimit(rateLimitKey)
+  const rateLimit = checkRateLimit(rateLimitKey, { maxRequests: rateLimitLimit })
   
   if (!rateLimit.allowed) {
     return NextResponse.json(
@@ -308,11 +310,11 @@ export async function GET(request: NextRequest) {
       { 
         status: 429,
         headers: {
-          'X-RateLimit-Limit': rateLimitLimit,
+          'X-RateLimit-Limit': rateLimit.limit.toString(),
           'X-RateLimit-Remaining': '0',
           'X-RateLimit-Reset': rateLimit.resetAt.toString(),
           'Retry-After': Math.ceil((rateLimit.resetAt - Date.now()) / 1000).toString(),
-          'X-RateLimit-Identifier-Type': isGeneratedId ? 'session' : 'ip',
+          'X-RateLimit-Strategy': rateLimitStrategy,
         },
       }
     )
@@ -389,18 +391,13 @@ export async function GET(request: NextRequest) {
       notes: 'Context includes technical indicators (RSI, MACD, MA, Support/Resistance) and fundamental data (news, trends)',
     }
 
-    // Log whether we used generated ID or real IP
-    if (isGeneratedId) {
-      console.log('[generate-context] Request processed with generated session ID:', rateLimitKey)
-    }
-    
     const response = NextResponse.json(context)
     
-    // Add rate limit headers
-    response.headers.set('X-RateLimit-Limit', rateLimitLimit)
+    // Add rate limit headers (limit matches actual enforcement)
+    response.headers.set('X-RateLimit-Limit', rateLimit.limit.toString())
     response.headers.set('X-RateLimit-Remaining', rateLimit.remaining.toString())
     response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toString())
-    response.headers.set('X-RateLimit-Identifier-Type', isGeneratedId ? 'session' : 'ip')
+    response.headers.set('X-RateLimit-Strategy', rateLimitStrategy)
     
     return response
   } catch (error: any) {
