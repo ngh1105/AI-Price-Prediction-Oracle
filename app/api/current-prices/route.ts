@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Maximum number of symbols allowed per request
+const MAX_SYMBOLS = 50
+
 const BINANCE_BASE_URLS = [
   'https://api.binance.com',
   'https://api-gcp.binance.com',
@@ -106,6 +109,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'At least one symbol is required' }, { status: 400 })
   }
 
+  // Enforce maximum symbols limit
+  if (symbols.length > MAX_SYMBOLS) {
+    const truncatedSymbols = symbols.slice(0, 10).join(', ')
+    const symbolsPreview = symbols.length > 10 
+      ? `${truncatedSymbols}... (and ${symbols.length - 10} more)`
+      : symbols.join(', ')
+    
+    console.error(`[current-prices] Request exceeded MAX_SYMBOLS limit: ${symbols.length} > ${MAX_SYMBOLS}. Symbols: ${symbolsPreview}`)
+    
+    return NextResponse.json(
+      { 
+        error: `Too many symbols requested. Maximum allowed: ${MAX_SYMBOLS}, received: ${symbols.length}`,
+        requested_count: symbols.length,
+        max_allowed: MAX_SYMBOLS,
+        symbols_preview: symbols.slice(0, 10) // Include first 10 for debugging
+      }, 
+      { status: 400 }
+    )
+  }
+
   try {
     // Fetch prices for all symbols in parallel
     const pricePromises = symbols.map(async (symbol) => {
@@ -159,8 +182,20 @@ export async function GET(request: NextRequest) {
       timestamp: new Date().toISOString(),
     })
   } catch (error: any) {
-    console.error('Error fetching current prices:', error)
-    return NextResponse.json({ error: error.message || 'Failed to fetch prices' }, { status: 500 })
+    const symbolsPreview = symbols.length > 10 
+      ? `${symbols.slice(0, 10).join(', ')}... (and ${symbols.length - 10} more)`
+      : symbols.join(', ')
+    
+    console.error(`[current-prices] Error fetching prices for ${symbols.length} symbols: ${symbolsPreview}`, error)
+    
+    return NextResponse.json(
+      { 
+        error: error.message || 'Failed to fetch prices',
+        symbols_count: symbols.length,
+        symbols_preview: symbols.slice(0, 10) // Include first 10 for debugging
+      }, 
+      { status: 500 }
+    )
   }
 }
 
