@@ -133,6 +133,45 @@ export default function Page() {
     }
   }, [symbolsQuery.data, selectedSymbol])
 
+  // Current prices query - fetch TẤT CẢ symbols mỗi 1 phút
+  const currentPricesQuery = useQuery({
+    queryKey: ['current-prices', symbolsQuery.data],
+    queryFn: async () => {
+      if (!symbolsQuery.data || symbolsQuery.data.length === 0) return {}
+      
+      try {
+        const symbolsParam = symbolsQuery.data.join(',')
+        const resp = await fetch(`/api/current-prices?symbols=${encodeURIComponent(symbolsParam)}`)
+        if (!resp.ok) return {}
+        
+        const data = await resp.json()
+        // Convert to map: { symbol: price }
+        const pricesMap: Record<string, number> = {}
+        if (data.prices) {
+          Object.entries(data.prices).forEach(([symbol, priceData]: [string, any]) => {
+            if (priceData.price !== null && priceData.price !== undefined) {
+              pricesMap[symbol] = priceData.price
+            }
+          })
+        }
+        return pricesMap
+      } catch (error) {
+        console.error('Failed to fetch current prices:', error)
+        return {}
+      }
+    },
+    enabled: !!symbolsQuery.data && symbolsQuery.data.length > 0,
+    refetchInterval: 60_000, // Update mỗi 1 phút (60 giây)
+    staleTime: 0, // Luôn coi là stale để refetch
+  })
+
+  // Helper để lấy current price cho một symbol cụ thể
+  const getCurrentPrice = (symbol: string | null): number | null => {
+    if (!symbol || !currentPricesQuery.data) return null
+    return currentPricesQuery.data[symbol] ?? null
+  }
+
+  // Prediction query - KHÔNG auto-refresh, chỉ fetch khi cần
   const predictionQuery = useQuery({
     queryKey: ['prediction', selectedSymbol, selectedTimeframe],
     queryFn: async () => {
@@ -199,7 +238,8 @@ export default function Page() {
       }
     },
     enabled: !!selectedSymbol,
-    refetchInterval: 60_000,
+    refetchInterval: false, // KHÔNG auto-refresh predictions
+    staleTime: Infinity, // Predictions không bao giờ stale (chỉ update khi manual refresh)
     retry: false, // Don't retry on "no predictions" errors
   })
 
@@ -503,9 +543,13 @@ export default function Page() {
                   {predictionQuery.isLoading && <PredictionCardSkeleton />}
                   {predictionQuery.data && (
                     <div className="space-y-4">
-                      <PredictionCard prediction={predictionQuery.data} />
+                      <PredictionCard 
+                        prediction={predictionQuery.data} 
+                        currentPrice={getCurrentPrice(selectedSymbol) ?? undefined}
+                      />
                       {(() => {
-                        const currentPrice = (() => {
+                        // Use current price from query, fallback to raw_context if needed
+                        const currentPrice = getCurrentPrice(selectedSymbol) ?? (() => {
                           try {
                             const context = JSON.parse(predictionQuery.data.raw_context || '{}')
                             return context.technical_indicators?.current_price || context.price?.spot || null
@@ -513,6 +557,7 @@ export default function Page() {
                             return null
                           }
                         })()
+                        
                         const predictedPrice = (() => {
                           const match = predictionQuery.data.predicted_price?.match(/[\d.]+/)
                           return match ? parseFloat(match[0]) : null
@@ -553,7 +598,7 @@ export default function Page() {
                 selectedSymbol ? (
                   <PredictionHistory 
                     symbol={selectedSymbol}
-                    currentPrice={(() => {
+                    currentPrice={getCurrentPrice(selectedSymbol) ?? (() => {
                       if (!predictionQuery.data?.raw_context) return null
                       try {
                         const context = JSON.parse(predictionQuery.data.raw_context)
