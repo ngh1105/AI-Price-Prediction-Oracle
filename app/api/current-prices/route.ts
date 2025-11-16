@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { NextFetchRequestConfig } from 'next/server'
 
 // Maximum number of symbols allowed per request
 const MAX_SYMBOLS = 50
@@ -12,7 +11,7 @@ const FETCH_TIMEOUT_MS = 5000
  */
 async function fetchWithTimeout(
   url: string, 
-  options: RequestInit & { next?: NextFetchRequestConfig } = {}
+  options: RequestInit & { next?: { revalidate?: number; tags?: string[] } } = {}
 ): Promise<Response> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
@@ -70,7 +69,7 @@ async function fetchPriceBinance(symbol: string): Promise<{ price: number; chang
   for (const baseUrl of BINANCE_BASE_URLS) {
     try {
       const resp = await fetchWithTimeout(`${baseUrl}/api/v3/ticker/24hr?symbol=${binanceSymbol}`, {
-        next: { revalidate: 10 }, // Cache 10 giây
+        next: { revalidate: 10 }, // Cache for 10 seconds
       })
       if (resp.ok) {
         const data = await resp.json()
@@ -107,7 +106,7 @@ async function fetchPriceCoinGecko(symbol: string): Promise<{ price: number; cha
   try {
     const cgResp = await fetchWithTimeout(
       `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=usd&include_24hr_change=true`,
-      { next: { revalidate: 10 } } // Cache 10 giây
+      { next: { revalidate: 10 } } // Cache for 10 seconds
     )
     if (cgResp.ok) {
       const cgData = await cgResp.json()
