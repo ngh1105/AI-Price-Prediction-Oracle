@@ -61,7 +61,13 @@ function parsePredictedPrice(predictedPrice: string): number | null {
   return null
 }
 
-export function PredictionCard({ prediction }: { prediction: Prediction }) {
+export function PredictionCard({ 
+  prediction,
+  currentPrice: currentPriceProp 
+}: { 
+  prediction: Prediction
+  currentPrice?: number | null
+}) {
   // generated_at might be a counter (number) or timestamp
   // If it's a small number (< 1000000), it's likely a counter, not a timestamp
   const generatedAtValue = typeof prediction.generated_at === 'string' 
@@ -72,13 +78,18 @@ export function PredictionCard({ prediction }: { prediction: Prediction }) {
     : `Update #${generatedAtValue}`
   const outlook = prediction.outlook ?? 'neutral'
   
+  // Ưu tiên dùng currentPrice từ props (real-time), fallback về raw_context
   const currentPrice = useMemo(() => {
+    if (currentPriceProp !== undefined && currentPriceProp !== null) {
+      return currentPriceProp
+    }
+    // Fallback to parsing from raw_context
     const price = parseCurrentPrice(prediction.raw_context)
     if (price === null && prediction.raw_context) {
       console.warn(`[PredictionCard] Could not parse current price for ${prediction.symbol}. raw_context length: ${prediction.raw_context.length}`)
     }
     return price
-  }, [prediction.raw_context, prediction.symbol])
+  }, [currentPriceProp, prediction.raw_context, prediction.symbol])
   
   const predictedPriceNum = useMemo(() => {
     const price = parsePredictedPrice(prediction.predicted_price)

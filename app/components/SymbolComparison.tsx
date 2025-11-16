@@ -49,6 +49,38 @@ export function SymbolComparison() {
     refetchInterval: 60_000, // Auto-refresh every 60 seconds
   })
 
+  // Fetch real-time current prices for all selected symbols
+  const currentPricesQuery = useQuery({
+    queryKey: ['current-prices-comparison', selectedSymbols],
+    queryFn: async () => {
+      if (selectedSymbols.length === 0) return {}
+      
+      try {
+        const symbolsParam = selectedSymbols.join(',')
+        const resp = await fetch(`/api/current-prices?symbols=${encodeURIComponent(symbolsParam)}`)
+        if (!resp.ok) return {}
+        
+        const data = await resp.json()
+        // Convert to map: { symbol: price }
+        const pricesMap: Record<string, number> = {}
+        if (data.prices) {
+          Object.entries(data.prices).forEach(([symbol, priceData]: [string, any]) => {
+            if (priceData.price !== null && priceData.price !== undefined) {
+              pricesMap[symbol] = priceData.price
+            }
+          })
+        }
+        return pricesMap
+      } catch (error) {
+        console.error('Failed to fetch current prices for comparison:', error)
+        return {}
+      }
+    },
+    enabled: selectedSymbols.length > 0,
+    refetchInterval: 60_000, // Update mỗi 1 phút (60 giây)
+    staleTime: 0, // Luôn coi là stale để refetch
+  })
+
   const predictions = useQuery({
     queryKey: ['comparison', selectedSymbols],
     queryFn: async () => {
@@ -79,7 +111,9 @@ export function SymbolComparison() {
               }
             } catch {}
             
-            const currentPrice = parseCurrentPrice(predAny.raw_context as string)
+            // Ưu tiên dùng real-time price từ query, fallback về raw_context
+            const realTimePrice = currentPricesQuery.data?.[symbol] ?? null
+            const currentPrice = realTimePrice ?? parseCurrentPrice(predAny.raw_context as string)
             const predictedPrice = parsePredictedPrice(predAny.predicted_price as string)
             const priceChange = currentPrice && predictedPrice
               ? ((predictedPrice - currentPrice) / currentPrice) * 100
