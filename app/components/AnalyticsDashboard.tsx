@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { listSymbols, fetchAllTimeframePredictions, TIMEFRAMES, type Timeframe } from '@/lib/contract'
+import { listSymbols, fetchAllTimeframePredictions, getSymbolStatistics, TIMEFRAMES, type Timeframe } from '@/lib/contract'
 import { motion } from 'framer-motion'
 import { BarChart3, TrendingUp, TrendingDown, Activity, Target, Clock, Trophy } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -66,7 +66,65 @@ export function AnalyticsDashboard() {
     refetchInterval: 60_000,
   })
 
+  // Fetch on-chain statistics for all symbols (more efficient than calculating client-side)
+  const statisticsQueries = useQuery({
+    queryKey: ['symbol-statistics', symbolsQuery.data],
+    queryFn: async () => {
+      if (!symbolsQuery.data || symbolsQuery.data.length === 0) return []
+      
+      const results: Array<{ symbol: string; stats: any }> = []
+      
+      for (const symbol of symbolsQuery.data) {
+        try {
+          const stats = await getSymbolStatistics(symbol)
+          results.push({ symbol, stats })
+        } catch (error) {
+          console.error(`Failed to fetch statistics for ${symbol}:`, error)
+        }
+      }
+      
+      return results
+    },
+    enabled: !!symbolsQuery.data && symbolsQuery.data.length > 0,
+    refetchInterval: 60_000,
+  })
+
   const stats = useMemo(() => {
+    // Prefer on-chain statistics if available, fallback to client-side calculation
+    if (statisticsQueries.data && statisticsQueries.data.length > 0) {
+      const symbolStats: SymbolStats[] = []
+      
+      for (const { symbol, stats: onChainStats } of statisticsQueries.data) {
+        // Get predictions for outlook distribution
+        const predData = predictionsQueries.data?.find(p => p.symbol === symbol)
+        const preds = predData ? Object.values(predData.predictions) : []
+        
+        let bullishCount = 0
+        let bearishCount = 0
+        let neutralCount = 0
+        
+        for (const pred of preds) {
+          const outlook = (pred.outlook || 'neutral').toLowerCase()
+          if (outlook === 'bullish') bullishCount++
+          else if (outlook === 'bearish') bearishCount++
+          else neutralCount++
+        }
+        
+        symbolStats.push({
+          symbol,
+          totalPredictions: parseInt(onChainStats.total_predictions || '0', 10),
+          averageConfidence: parseFloat(onChainStats.avg_confidence || '0'),
+          bullishCount,
+          bearishCount,
+          neutralCount,
+          timeframesWithPredictions: preds.length,
+        })
+      }
+      
+      return symbolStats.sort((a, b) => b.totalPredictions - a.totalPredictions)
+    }
+    
+    // Fallback to client-side calculation
     if (!predictionsQueries.data) return []
 
     const symbolStats: SymbolStats[] = []
@@ -104,7 +162,7 @@ export function AnalyticsDashboard() {
     }
 
     return symbolStats.sort((a, b) => b.totalPredictions - a.totalPredictions)
-  }, [predictionsQueries.data])
+  }, [predictionsQueries.data, statisticsQueries.data])
 
   const overallStats = useMemo(() => {
     if (stats.length === 0) return null
@@ -126,7 +184,7 @@ export function AnalyticsDashboard() {
     }
   }, [stats])
 
-  if (symbolsQuery.isLoading || predictionsQueries.isLoading) {
+  if (symbolsQuery.isLoading || predictionsQueries.isLoading || statisticsQueries.isLoading) {
     return (
       <div className="bg-card/80 backdrop-blur-sm border border-card-border/60 rounded-2xl p-6">
         <div className="text-sm text-muted text-center py-4">Loading analytics...</div>

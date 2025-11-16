@@ -52,13 +52,24 @@ export function PredictionHistory({ symbol, currentPrice, timeframe }: Predictio
   })
 
   const historyWithAccuracy = useMemo(() => {
-    if (!historyQuery.data || !currentPrice) return []
+    if (!historyQuery.data) return []
     
     return historyQuery.data.map((pred: any) => {
       const predicted = parsePredictedPrice(pred.predicted_price || '')
       let accuracy: number | null = null
       
-      if (predicted && currentPrice) {
+      // Priority 1: Use on-chain accuracy_score if available (from contract)
+      if (pred.accuracy_score !== undefined && pred.accuracy_score !== null && pred.accuracy_score !== '0') {
+        const onChainAccuracy = typeof pred.accuracy_score === 'string' 
+          ? parseFloat(pred.accuracy_score) 
+          : pred.accuracy_score
+        if (!isNaN(onChainAccuracy) && onChainAccuracy > 0) {
+          accuracy = onChainAccuracy
+        }
+      }
+      
+      // Priority 2: Fallback to calculating from current price if no on-chain accuracy
+      if (accuracy === null && predicted && currentPrice) {
         // Calculate how close the prediction was (inverse of error percentage)
         const error = Math.abs((predicted - currentPrice) / currentPrice) * 100
         accuracy = Math.max(0, 100 - error) // 100% if perfect, 0% if very wrong
@@ -68,6 +79,8 @@ export function PredictionHistory({ symbol, currentPrice, timeframe }: Predictio
         ...pred,
         predictedNum: predicted,
         accuracy,
+        actualPrice: pred.actual_price || null, // Include actual_price if available
+        isExpired: pred.is_expired === 'true' || pred.is_expired === true,
       }
     })
   }, [historyQuery.data, currentPrice])

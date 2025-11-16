@@ -29,6 +29,11 @@ class PredictionRecord:
     key_events_json: str
     sources_json: str
     raw_context: str
+    # New fields for accuracy tracking
+    generated_at: u64  # Timestamp when prediction was created
+    actual_price: str  # Set when timeframe expires (empty string if not yet expired)
+    accuracy_score: u8  # 0-100, calculated when actual_price is set
+    is_expired: bool  # True if prediction timeframe has passed
 
 
 class MarketPredictionManager(gl.Contract):
@@ -328,6 +333,10 @@ sources should cite URLs or clear identifiers.
                 trimmed_sources.append(str(item)[:256])
             sources_json = json.dumps(trimmed_sources)
 
+        # Get current timestamp (Unix timestamp in seconds)
+        import time
+        current_timestamp = u64(int(time.time()))
+        
         return PredictionRecord(
             prediction_id=prediction_id,
             symbol=symbol,
@@ -341,6 +350,10 @@ sources should cite URLs or clear identifiers.
             key_events_json=key_events_json,
             sources_json=sources_json,
             raw_context=context_json[:4096],
+            generated_at=current_timestamp,
+            actual_price="",
+            accuracy_score=u8(0),
+            is_expired=False,
         )
 
     @gl.public.view
@@ -490,10 +503,282 @@ sources should cite URLs or clear identifiers.
         data["key_events_json"] = record.key_events_json
         data["sources_json"] = record.sources_json
         data["raw_context"] = record.raw_context
+        # New fields for accuracy tracking
+        data["generated_at"] = str(int(record.generated_at)) if hasattr(record, 'generated_at') else "0"
+        data["actual_price"] = record.actual_price if hasattr(record, 'actual_price') else ""
+        data["accuracy_score"] = str(int(record.accuracy_score)) if hasattr(record, 'accuracy_score') else "0"
+        data["is_expired"] = "true" if (hasattr(record, 'is_expired') and record.is_expired) else "false"
         return data
 
     def _delete_prediction_if_exists(self, prediction_id: str) -> None:
         record = self.predictions.get(prediction_id)
         if record is not None:
             del self.predictions[prediction_id]
+
+    def _parse_price(self, price_str: str) -> float:
+        """Parse price from string format (e.g., '43750.25 USD' or '43750.25')"""
+        import re
+        if not price_str or len(price_str.strip()) == 0:
+            raise ValueError("price string is empty")
+        # Extract numeric value
+        match = re.search(r'[\d,]+\.?\d*', price_str.replace(',', ''))
+        if match:
+            try:
+                return float(match.group(0))
+            except:
+                raise ValueError(f"invalid price format: {price_str}")
+        raise ValueError(f"no numeric value found in price: {price_str}")
+
+    def _calculate_accuracy(self, predicted: float, actual: float) -> int:
+        """Calculate accuracy score (0-100) based on percentage error"""
+        if actual <= 0:
+            return 0
+        error_percentage = abs((predicted - actual) / actual) * 100
+        accuracy = max(0, min(100, int(100 - error_percentage)))
+        return accuracy
+
+    @gl.public.write
+    def record_actual_price(self, prediction_id: str, actual_price: str) -> None:
+        """
+        Record the actual price when a prediction's timeframe expires.
+        Calculates and stores the accuracy score.
+        
+        Args:
+            prediction_id: The prediction ID to update
+            actual_price: The actual price at expiration (e.g., "43750.25 USD")
+        """
+        if len(actual_price.strip()) == 0:
+            raise ValueError("actual_price required")
+        
+        record = self.predictions.get(prediction_id)
+        if record is None:
+            raise ValueError("prediction not found")
+        
+        if record.is_expired and len(record.actual_price) > 0:
+            raise ValueError("prediction already has actual price recorded")
+        
+        # Parse prices
+        try:
+            predicted_num = self._parse_price(record.predicted_price)
+            actual_num = self._parse_price(actual_price)
+        except Exception as exc:
+            raise ValueError(f"price parsing error: {exc}")
+        
+        # Calculate accuracy
+        accuracy = self._calculate_accuracy(predicted_num, actual_num)
+        
+        # Update record
+        record.actual_price = actual_price.strip()
+        record.accuracy_score = u8(accuracy)
+        record.is_expired = True
+        self.predictions[prediction_id] = record
+
+    @gl.public.view
+    def get_expired_predictions(self, symbol: str, timeframe: str, limit: int = 50) -> typing.List[TreeMap[str, str]]:
+        """
+        Get predictions that have expired but don't have actual_price recorded yet.
+        Useful for automated systems to record actual prices.
+        
+        Args:
+            symbol: Trading symbol
+            timeframe: Prediction timeframe
+            limit: Maximum number of predictions to return
+        
+        Returns:
+            List of expired predictions without actual_price
+        """
+        import time
+        current_time = int(time.time())
+        
+        key = symbol.upper().strip()
+        tf = timeframe.lower().strip()
+        
+        valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+        if tf not in valid_timeframes:
+            raise ValueError(f"invalid timeframe. Must be one of: {valid_timeframes}")
+        
+        # Timeframe durations in seconds
+        timeframe_durations = {
+            "1h": 3600,
+            "4h": 14400,
+            "12h": 43200,
+            "24h": 86400,
+            "7d": 604800,
+            "30d": 2592000
+        }
+        duration = timeframe_durations.get(tf, 86400)
+        
+        tf_key = f"{key}-{tf}"
+        counter = int(self.symbol_timeframe_counters.get(tf_key, u64(0)))
+        
+        if counter == 0:
+            return []
+        
+        expired: typing.List[TreeMap[str, str]] = []
+        current = counter
+        collected = 0
+        
+        while current >= 1 and collected < limit:
+            prediction_id = f"{key}-{tf}-{current}"
+            record = self.predictions.get(prediction_id)
+            
+            if record is None:
+                current -= 1
+                continue
+            
+            # Check if expired (has generated_at field)
+            if hasattr(record, 'generated_at') and record.generated_at > 0:
+                expiration_time = int(record.generated_at) + duration
+                if current_time >= expiration_time:
+                    # Check if actual_price not yet recorded
+                    if not hasattr(record, 'actual_price') or len(record.actual_price) == 0:
+                        expired.append(self._record_to_map(record))
+                        collected += 1
+            elif not hasattr(record, 'generated_at'):
+                # Legacy record without generated_at - skip for now
+                pass
+            
+            current -= 1
+        
+        return expired
+
+    @gl.public.view
+    def get_symbol_statistics(self, symbol: str) -> TreeMap[str, str]:
+        """
+        Get aggregated statistics for a symbol across all timeframes.
+        
+        Returns:
+            TreeMap with statistics: total_predictions, avg_confidence, avg_accuracy,
+            predictions_with_accuracy, best_accuracy, worst_accuracy
+        """
+        key = symbol.upper().strip()
+        if key not in self.symbols:
+            raise ValueError("symbol not registered")
+        
+        total_predictions = 0
+        total_confidence = 0
+        total_accuracy = 0
+        predictions_with_accuracy = 0
+        best_accuracy = 0
+        worst_accuracy = 100
+        
+        valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+        
+        for tf in valid_timeframes:
+            tf_key = f"{key}-{tf}"
+            counter = int(self.symbol_timeframe_counters.get(tf_key, u64(0)))
+            
+            for i in range(1, counter + 1):
+                prediction_id = f"{key}-{tf}-{i}"
+                record = self.predictions.get(prediction_id)
+                
+                if record is None:
+                    continue
+                
+                total_predictions += 1
+                total_confidence += int(record.confidence)
+                
+                # Check for accuracy
+                if hasattr(record, 'accuracy_score') and record.accuracy_score > 0:
+                    acc = int(record.accuracy_score)
+                    total_accuracy += acc
+                    predictions_with_accuracy += 1
+                    if acc > best_accuracy:
+                        best_accuracy = acc
+                    if acc < worst_accuracy:
+                        worst_accuracy = acc
+        
+        stats = gl.storage.inmem_allocate(TreeMap[str, str])
+        stats["symbol"] = key
+        stats["total_predictions"] = str(total_predictions)
+        
+        if total_predictions > 0:
+            stats["avg_confidence"] = str(round(total_confidence / total_predictions, 2))
+        else:
+            stats["avg_confidence"] = "0"
+        
+        if predictions_with_accuracy > 0:
+            stats["avg_accuracy"] = str(round(total_accuracy / predictions_with_accuracy, 2))
+            stats["predictions_with_accuracy"] = str(predictions_with_accuracy)
+            stats["best_accuracy"] = str(best_accuracy)
+            stats["worst_accuracy"] = str(worst_accuracy)
+        else:
+            stats["avg_accuracy"] = "0"
+            stats["predictions_with_accuracy"] = "0"
+            stats["best_accuracy"] = "0"
+            stats["worst_accuracy"] = "0"
+        
+        return stats
+
+    @gl.public.view
+    def get_timeframe_statistics(self, symbol: str, timeframe: str) -> TreeMap[str, str]:
+        """
+        Get aggregated statistics for a specific symbol and timeframe.
+        
+        Returns:
+            TreeMap with statistics: total_predictions, avg_confidence, avg_accuracy,
+            predictions_with_accuracy, best_accuracy, worst_accuracy
+        """
+        key = symbol.upper().strip()
+        tf = timeframe.lower().strip()
+        
+        valid_timeframes = ["1h", "4h", "12h", "24h", "7d", "30d"]
+        if tf not in valid_timeframes:
+            raise ValueError(f"invalid timeframe. Must be one of: {valid_timeframes}")
+        
+        if key not in self.symbols:
+            raise ValueError("symbol not registered")
+        
+        tf_key = f"{key}-{tf}"
+        counter = int(self.symbol_timeframe_counters.get(tf_key, u64(0)))
+        
+        total_predictions = 0
+        total_confidence = 0
+        total_accuracy = 0
+        predictions_with_accuracy = 0
+        best_accuracy = 0
+        worst_accuracy = 100
+        
+        for i in range(1, counter + 1):
+            prediction_id = f"{key}-{tf}-{i}"
+            record = self.predictions.get(prediction_id)
+            
+            if record is None:
+                continue
+            
+            total_predictions += 1
+            total_confidence += int(record.confidence)
+            
+            # Check for accuracy
+            if hasattr(record, 'accuracy_score') and record.accuracy_score > 0:
+                acc = int(record.accuracy_score)
+                total_accuracy += acc
+                predictions_with_accuracy += 1
+                if acc > best_accuracy:
+                    best_accuracy = acc
+                if acc < worst_accuracy:
+                    worst_accuracy = acc
+        
+        stats = gl.storage.inmem_allocate(TreeMap[str, str])
+        stats["symbol"] = key
+        stats["timeframe"] = tf
+        stats["total_predictions"] = str(total_predictions)
+        
+        if total_predictions > 0:
+            stats["avg_confidence"] = str(round(total_confidence / total_predictions, 2))
+        else:
+            stats["avg_confidence"] = "0"
+        
+        if predictions_with_accuracy > 0:
+            stats["avg_accuracy"] = str(round(total_accuracy / predictions_with_accuracy, 2))
+            stats["predictions_with_accuracy"] = str(predictions_with_accuracy)
+            stats["best_accuracy"] = str(best_accuracy)
+            stats["worst_accuracy"] = str(worst_accuracy)
+        else:
+            stats["avg_accuracy"] = "0"
+            stats["predictions_with_accuracy"] = "0"
+            stats["best_accuracy"] = "0"
+            stats["worst_accuracy"] = "0"
+        
+        return stats
 

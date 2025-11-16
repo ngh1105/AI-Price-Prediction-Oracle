@@ -116,6 +116,105 @@ def is_timeframe_expired(client, contract_address: str, symbol: str, timeframe: 
     return True
 
 
+def _fetch_current_price(symbol: str) -> float:
+  """Fetch current price for a symbol using context builder"""
+  try:
+    # Build context to get price data
+    context_str = build_market_context(symbol)
+    context = json.loads(context_str)
+    
+    # Try to get price from context
+    price_data = context.get('price', {})
+    if 'spot' in price_data and price_data['spot']:
+      return float(price_data['spot'])
+    
+    # Fallback to technical_indicators
+    tech_data = context.get('technical_indicators', {})
+    if 'current_price' in tech_data and tech_data['current_price']:
+      return float(tech_data['current_price'])
+    
+    raise ValueError(f"No price found in context for {symbol}")
+  except Exception as e:
+    logging.error(f"Failed to fetch price for {symbol}: {e}")
+    raise
+
+
+def record_expired_predictions(client, contract_address: str, account):
+  """
+  Automatically record actual prices for expired predictions.
+  This runs after prediction updates to ensure expired predictions get their accuracy scores.
+  """
+  try:
+    logging.info('Checking for expired predictions that need actual price recording...')
+    
+    # Get all symbols
+    contract_symbols = list_registered_symbols(client, contract_address)
+    if not contract_symbols:
+      return
+    
+    TIMEFRAMES = ["1h", "4h", "12h", "24h", "7d", "30d"]
+    total_recorded = 0
+    total_failed = 0
+    
+    for symbol in contract_symbols:
+      for tf in TIMEFRAMES:
+        try:
+          # Get expired predictions from contract
+          expired = client.read_contract(
+            address=contract_address,
+            function_name='get_expired_predictions',
+            args=[symbol, tf, 50]  # Limit to 50 per timeframe
+          )
+          
+          if not expired or len(expired) == 0:
+            continue
+          
+          # Fetch current price for this symbol
+          try:
+            current_price = _fetch_current_price(symbol)
+            actual_price_str = f"{current_price} USD"
+          except Exception as e:
+            logging.warning(f'Could not fetch current price for {symbol}: {e}, skipping expired predictions')
+            continue
+          
+          # Record actual price for each expired prediction
+          for pred in expired:
+            try:
+              prediction_id = pred.get('prediction_id', '')
+              if not prediction_id:
+                continue
+              
+              # Submit transaction to record actual price
+              tx_hash = client.write_contract(
+                address=contract_address,
+                function_name='record_actual_price',
+                args=[prediction_id, actual_price_str],
+                value=0
+              )
+              
+              logging.info(f'Recorded actual price for {prediction_id}: {actual_price_str} (tx: {tx_hash})')
+              total_recorded += 1
+              
+              # Small delay to avoid rate limits
+              time.sleep(0.5)
+              
+            except Exception as e:
+              logging.warning(f'Failed to record actual price for {prediction_id}: {e}')
+              total_failed += 1
+          
+        except Exception as e:
+          logging.warning(f'Error processing expired predictions for {symbol} {tf}: {e}')
+          total_failed += 1
+    
+    if total_recorded > 0:
+      logging.info(f'Recorded actual prices for {total_recorded} expired predictions')
+    if total_failed > 0:
+      logging.warning(f'Failed to record {total_failed} expired predictions')
+      
+  except Exception as e:
+    logging.error(f'Error in record_expired_predictions: {e}', exc_info=True)
+
+
 def run_once():
   # Check if previous run is still in progress
   if not run_lock.acquire(blocking=False):
@@ -136,6 +235,7 @@ def run_once():
       'timeframes_failed': 0,
       'timeframes_skipped': 0,  # New counter for skipped timeframes
       'total_timeframes_checked': 0,
+      'expired_predictions_recorded': 0,
     }
     
     # Use cached client for better performance
@@ -246,6 +346,13 @@ def run_once():
       except Exception as error:
         logging.exception('Failed to process %s: %s', symbol, error)
         summary['symbols_failed'] += 1
+    
+    # Record actual prices for expired predictions
+    try:
+      logging.info('Recording actual prices for expired predictions...')
+      record_expired_predictions(client, contract_address, account)
+    except Exception as e:
+      logging.error(f'Error recording expired predictions: {e}', exc_info=True)
     
     # Log summary
     elapsed_time = time.time() - start_time

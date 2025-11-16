@@ -4,10 +4,14 @@
 
 export interface PredictionWithPrice {
   predicted_price: string
-  generated_at: number | string
+  generated_at?: number | string
   timeframe?: string
   confidence?: number | string
   outlook?: string
+  // New fields for on-chain accuracy tracking
+  actual_price?: string
+  accuracy_score?: number | string
+  is_expired?: boolean | string
 }
 
 export interface AccuracyMetrics {
@@ -68,11 +72,42 @@ export function calculateAccuracy(
 
 /**
  * Calculate accuracy for a prediction given current price
+ * Priority: Use on-chain accuracy_score if available, otherwise calculate from prices
  */
 export function calculatePredictionAccuracy(
   prediction: PredictionWithPrice,
   currentPrice: number | null
 ): AccuracyMetrics | null {
+  // Priority 1: Use on-chain accuracy_score if available
+  if (prediction.accuracy_score !== undefined && prediction.accuracy_score !== null) {
+    const onChainAccuracy = typeof prediction.accuracy_score === 'string' 
+      ? parseFloat(prediction.accuracy_score) 
+      : prediction.accuracy_score
+    if (!isNaN(onChainAccuracy) && onChainAccuracy >= 0 && onChainAccuracy <= 100) {
+      // Use actual_price if available, otherwise use currentPrice for error calculation
+      const actual = prediction.actual_price 
+        ? parsePredictedPrice(prediction.actual_price)
+        : currentPrice
+      
+      if (actual && actual > 0) {
+        const predicted = parsePredictedPrice(prediction.predicted_price)
+        if (predicted !== null) {
+          const absoluteError = Math.abs(predicted - actual)
+          const relativeError = absoluteError / actual
+          const error = relativeError * 100
+          
+          return {
+            accuracy: onChainAccuracy,
+            error,
+            absoluteError,
+            relativeError,
+          }
+        }
+      }
+    }
+  }
+  
+  // Priority 2: Calculate from current price
   if (!currentPrice || currentPrice <= 0) {
     return null
   }
@@ -87,6 +122,7 @@ export function calculatePredictionAccuracy(
 
 /**
  * Calculate comprehensive accuracy statistics for a symbol
+ * Uses on-chain accuracy_score when available, falls back to calculating from prices
  */
 export function calculateSymbolAccuracyStats(
   symbol: string,
@@ -94,7 +130,7 @@ export function calculateSymbolAccuracyStats(
   currentPrice: number | null,
   timeframe?: string
 ): SymbolAccuracyStats | null {
-  if (!currentPrice || currentPrice <= 0 || predictions.length === 0) {
+  if (predictions.length === 0) {
     return null
   }
 
@@ -103,6 +139,30 @@ export function calculateSymbolAccuracyStats(
   const absoluteErrors: number[] = []
 
   for (const pred of predictions) {
+    // Try to use on-chain accuracy_score first
+    if (pred.accuracy_score !== undefined && pred.accuracy_score !== null && pred.accuracy_score !== '0') {
+      const onChainAccuracy = typeof pred.accuracy_score === 'string' 
+        ? parseFloat(pred.accuracy_score) 
+        : pred.accuracy_score
+      if (!isNaN(onChainAccuracy) && onChainAccuracy >= 0 && onChainAccuracy <= 100) {
+        // Use actual_price if available for error calculation
+        const actual = pred.actual_price 
+          ? parsePredictedPrice(pred.actual_price)
+          : currentPrice
+        const predicted = parsePredictedPrice(pred.predicted_price)
+        
+        if (actual && actual > 0 && predicted !== null) {
+          const absoluteError = Math.abs(predicted - actual)
+          const error = (absoluteError / actual) * 100
+          accuracies.push(onChainAccuracy)
+          errors.push(error)
+          absoluteErrors.push(absoluteError)
+          continue
+        }
+      }
+    }
+    
+    // Fallback to calculating from current price
     const metrics = calculatePredictionAccuracy(pred, currentPrice)
     if (metrics) {
       accuracies.push(metrics.accuracy)
@@ -132,10 +192,12 @@ export function calculateSymbolAccuracyStats(
   const rmse = Math.sqrt(errors.reduce((sum, e) => sum + e * e, 0) / errors.length)
 
   // MAPE (Mean Absolute Percentage Error)
-  const mape = absoluteErrors.reduce((sum, ae) => {
-    const relative = ae / currentPrice
-    return sum + relative
-  }, 0) / absoluteErrors.length * 100
+  const mape = currentPrice && currentPrice > 0
+    ? absoluteErrors.reduce((sum, ae) => {
+        const relative = ae / currentPrice
+        return sum + relative
+      }, 0) / absoluteErrors.length * 100
+    : 0
 
   return {
     symbol,

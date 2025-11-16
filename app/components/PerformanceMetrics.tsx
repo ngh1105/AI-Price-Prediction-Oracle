@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { listSymbols, fetchPredictionHistoryByTimeframe, TIMEFRAMES, type Timeframe } from '@/lib/contract'
+import { listSymbols, fetchPredictionHistoryByTimeframe, getTimeframeStatistics, getSymbolStatistics, TIMEFRAMES, type Timeframe } from '@/lib/contract'
 import { 
   calculateSymbolAccuracyStats, 
   getBestWorstPredictions,
@@ -102,7 +102,47 @@ export function PerformanceMetrics() {
     refetchInterval: 60_000,
   })
 
+  // Try to fetch on-chain statistics first (more efficient)
+  const onChainStatsQuery = useQuery({
+    queryKey: ['onchain-stats', defaultSymbol, selectedTimeframe],
+    queryFn: async () => {
+      if (!defaultSymbol) return null
+      
+      try {
+        if (selectedTimeframe === 'all') {
+          return await getSymbolStatistics(defaultSymbol)
+        } else {
+          return await getTimeframeStatistics(defaultSymbol, selectedTimeframe)
+        }
+      } catch (error) {
+        console.error('[PerformanceMetrics] Error fetching on-chain stats:', error)
+        return null
+      }
+    },
+    enabled: !!defaultSymbol,
+    refetchInterval: 60_000,
+  })
+
   const stats = useMemo(() => {
+    // Priority 1: Use on-chain statistics if available
+    if (onChainStatsQuery.data) {
+      const onChain = onChainStatsQuery.data as any
+      return {
+        symbol: defaultSymbol || '',
+        timeframe: selectedTimeframe === 'all' ? undefined : selectedTimeframe,
+        totalPredictions: parseInt(onChain.total_predictions || '0', 10),
+        averageAccuracy: parseFloat(onChain.avg_accuracy || '0'),
+        medianAccuracy: parseFloat(onChain.avg_accuracy || '0'), // Contract doesn't provide median, use avg
+        bestAccuracy: parseFloat(onChain.best_accuracy || '0'),
+        worstAccuracy: parseFloat(onChain.worst_accuracy || '0'),
+        mae: 0, // Contract doesn't provide MAE, would need to calculate
+        rmse: 0, // Contract doesn't provide RMSE, would need to calculate
+        mape: 0, // Contract doesn't provide MAPE, would need to calculate
+        predictionsWithAccuracy: parseInt(onChain.predictions_with_accuracy || '0', 10),
+      }
+    }
+    
+    // Priority 2: Fallback to calculating from history
     if (!defaultSymbol || !historyQuery.data || historyQuery.data.length === 0 || !currentPriceQuery.data) {
       return null
     }
@@ -113,13 +153,53 @@ export function PerformanceMetrics() {
       currentPriceQuery.data,
       selectedTimeframe === 'all' ? undefined : selectedTimeframe
     )
-  }, [defaultSymbol, historyQuery.data, currentPriceQuery.data, selectedTimeframe])
+  }, [defaultSymbol, historyQuery.data, currentPriceQuery.data, selectedTimeframe, onChainStatsQuery.data])
 
   const { best, worst } = useMemo(() => {
-    if (!historyQuery.data || !currentPriceQuery.data) {
+    if (!historyQuery.data) {
       return { best: null, worst: null }
     }
-    return getBestWorstPredictions(historyQuery.data, currentPriceQuery.data)
+    
+    // Find best/worst from history using on-chain accuracy_score if available
+    let bestPred: any = null
+    let worstPred: any = null
+    let bestAccuracy = -1
+    let worstAccuracy = 101
+    
+    for (const pred of historyQuery.data) {
+      // Use on-chain accuracy_score if available
+      let accuracy: number | null = null
+      if (pred.accuracy_score !== undefined && pred.accuracy_score !== null && pred.accuracy_score !== '0') {
+        const onChainAccuracy = typeof pred.accuracy_score === 'string' 
+          ? parseFloat(pred.accuracy_score) 
+          : pred.accuracy_score
+        if (!isNaN(onChainAccuracy) && onChainAccuracy > 0) {
+          accuracy = onChainAccuracy
+        }
+      }
+      
+      // Fallback to calculating from current price
+      if (accuracy === null && currentPriceQuery.data) {
+        const predicted = parsePredictedPrice(pred.predicted_price || '')
+        if (predicted) {
+          const error = Math.abs((predicted - currentPriceQuery.data) / currentPriceQuery.data) * 100
+          accuracy = Math.max(0, 100 - error)
+        }
+      }
+      
+      if (accuracy !== null) {
+        if (accuracy > bestAccuracy) {
+          bestAccuracy = accuracy
+          bestPred = { ...pred, accuracy }
+        }
+        if (accuracy < worstAccuracy) {
+          worstAccuracy = accuracy
+          worstPred = { ...pred, accuracy }
+        }
+      }
+    }
+    
+    return { best: bestPred, worst: worstPred }
   }, [historyQuery.data, currentPriceQuery.data])
 
   // Accuracy over time (for chart visualization)
@@ -149,7 +229,7 @@ export function PerformanceMetrics() {
     return accuracies.sort((a, b) => a.timestamp - b.timestamp)
   }, [historyQuery.data, currentPriceQuery.data])
 
-  if (symbolsQuery.isLoading || historyQuery.isLoading || currentPriceQuery.isLoading) {
+  if (symbolsQuery.isLoading || historyQuery.isLoading || currentPriceQuery.isLoading || onChainStatsQuery.isLoading) {
     return (
       <div className="bg-card/80 backdrop-blur-sm border border-card-border/60 rounded-2xl p-6">
         <div className="text-sm text-muted text-center py-4">Loading performance metrics...</div>

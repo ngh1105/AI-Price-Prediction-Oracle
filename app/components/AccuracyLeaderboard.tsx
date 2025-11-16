@@ -100,7 +100,34 @@ export function AccuracyLeaderboard() {
   const leaderboard = useMemo(() => {
     if (!predictionsQueries.data) return []
     
-    const stats = calculateLeaderboard(predictionsQueries.data)
+    // Process predictions to use on-chain accuracy_score when available
+    const processedData = predictionsQueries.data.map(({ symbol, predictions, currentPrice, timeframe }) => {
+      // Filter predictions that have on-chain accuracy_score (preferred)
+      const predictionsWithOnChainAccuracy = predictions.filter((pred: any) => {
+        const accuracy = pred.accuracy_score
+        return accuracy !== undefined && accuracy !== null && accuracy !== '0' && accuracy !== 0
+      })
+      
+      // If we have predictions with on-chain accuracy, use them
+      if (predictionsWithOnChainAccuracy.length > 0) {
+        return {
+          symbol,
+          predictions: predictionsWithOnChainAccuracy,
+          currentPrice: null, // Not needed when using on-chain accuracy
+          timeframe,
+        }
+      }
+      
+      // Fallback to client-side calculation if no on-chain accuracy
+      return {
+        symbol,
+        predictions,
+        currentPrice,
+        timeframe,
+      }
+    })
+    
+    const stats = calculateLeaderboard(processedData)
     
     // Sort by selected metric
     return stats.sort((a, b) => {

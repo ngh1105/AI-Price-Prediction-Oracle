@@ -237,6 +237,61 @@ export async function fetchSymbolConfig(symbol: string) {
   return readContract('get_symbol_config', [symbol])
 }
 
+// Accuracy tracking methods
+export async function recordActualPrice(
+  account: Account | Address | undefined,
+  predictionId: string,
+  actualPrice: string,
+  provider?: any,
+  useLocalAccount: boolean = true
+) {
+  try {
+    const tx = await writeContract(
+      account,
+      'record_actual_price',
+      [predictionId, actualPrice],
+      0n,
+      provider,
+      useLocalAccount
+    )
+    console.log(`Record actual price transaction submitted: ${tx}`)
+    return tx
+  } catch (error: any) {
+    console.error(`Failed to record actual price: ${error}`)
+    throw error
+  }
+}
+
+export async function getExpiredPredictions(symbol: string, timeframe: string, limit = 50) {
+  try {
+    const response = await readContract('get_expired_predictions', [symbol, timeframe, limit])
+    return Array.isArray(response) ? response : []
+  } catch (error: any) {
+    console.error(`[getExpiredPredictions] Error for ${symbol} ${timeframe}:`, error)
+    return []
+  }
+}
+
+export async function getSymbolStatistics(symbol: string) {
+  try {
+    const response = await readContract('get_symbol_statistics', [symbol])
+    return response
+  } catch (error: any) {
+    console.error(`[getSymbolStatistics] Error for ${symbol}:`, error)
+    throw error
+  }
+}
+
+export async function getTimeframeStatistics(symbol: string, timeframe: string) {
+  try {
+    const response = await readContract('get_timeframe_statistics', [symbol, timeframe])
+    return response
+  } catch (error: any) {
+    console.error(`[getTimeframeStatistics] Error for ${symbol} ${timeframe}:`, error)
+    throw error
+  }
+}
+
 export async function addSymbol(
   account: Account | Address | undefined,
   { symbol, description }: { symbol: string; description: string },
@@ -432,4 +487,3 @@ export async function fetchAllTimeframePredictions(symbol: string) {
     return {}
   }
 }
-
