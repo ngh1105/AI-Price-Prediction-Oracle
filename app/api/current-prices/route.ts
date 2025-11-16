@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { NextFetchRequestConfig } from 'next/server'
 
 // Maximum number of symbols allowed per request
 const MAX_SYMBOLS = 50
@@ -9,7 +10,10 @@ const FETCH_TIMEOUT_MS = 5000
 /**
  * Fetch with timeout wrapper to prevent hung requests
  */
-async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+async function fetchWithTimeout(
+  url: string, 
+  options: RequestInit & { next?: NextFetchRequestConfig } = {}
+): Promise<Response> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   
