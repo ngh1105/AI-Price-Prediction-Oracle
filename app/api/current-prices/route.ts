@@ -3,6 +3,27 @@ import { NextRequest, NextResponse } from 'next/server'
 // Maximum number of symbols allowed per request
 const MAX_SYMBOLS = 50
 
+// Timeout for fetch requests (5 seconds)
+const FETCH_TIMEOUT_MS = 5000
+
+/**
+ * Fetch with timeout wrapper to prevent hung requests
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+    return response
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 const BINANCE_BASE_URLS = [
   'https://api.binance.com',
   'https://api-gcp.binance.com',
@@ -44,7 +65,7 @@ async function fetchPriceBinance(symbol: string): Promise<{ price: number; chang
 
   for (const baseUrl of BINANCE_BASE_URLS) {
     try {
-      const resp = await fetch(`${baseUrl}/api/v3/ticker/24hr?symbol=${binanceSymbol}`, {
+      const resp = await fetchWithTimeout(`${baseUrl}/api/v3/ticker/24hr?symbol=${binanceSymbol}`, {
         next: { revalidate: 10 }, // Cache 10 giây
       })
       if (resp.ok) {
@@ -55,10 +76,16 @@ async function fetchPriceBinance(symbol: string): Promise<{ price: number; chang
           source: 'binance',
         }
       } else if (resp.status === 400) {
-        // Invalid symbol, try next endpoint
+        // Invalid symbol - 400 means invalid symbol across all endpoints, return null immediately
+        return null
+      }
+    } catch (error: any) {
+      // Handle abort/timeout errors and other network errors
+      if (error.name === 'AbortError') {
+        // Timeout occurred, try next endpoint
         continue
       }
-    } catch {
+      // Other errors, try next endpoint
       continue
     }
   }
@@ -74,7 +101,7 @@ async function fetchPriceCoinGecko(symbol: string): Promise<{ price: number; cha
   }
   
   try {
-    const cgResp = await fetch(
+    const cgResp = await fetchWithTimeout(
       `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=usd&include_24hr_change=true`,
       { next: { revalidate: 10 } } // Cache 10 giây
     )
@@ -89,8 +116,14 @@ async function fetchPriceCoinGecko(symbol: string): Promise<{ price: number; cha
         }
       }
     }
-  } catch {
-    // Ignore errors
+  } catch (error: any) {
+    // Handle abort/timeout errors and other network errors
+    if (error.name === 'AbortError') {
+      // Timeout occurred, return null to allow fallback
+      return null
+    }
+    // Other errors, return null
+    return null
   }
   return null
 }
