@@ -3,9 +3,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { listSymbols, fetchAllTimeframePredictions, TIMEFRAMES, type Timeframe } from '@/lib/contract'
 import { motion } from 'framer-motion'
-import { BarChart3, TrendingUp, TrendingDown, Activity, Target, Clock } from 'lucide-react'
-import { useMemo } from 'react'
+import { BarChart3, TrendingUp, TrendingDown, Activity, Target, Clock, Trophy } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { AccuracyLeaderboard } from './AccuracyLeaderboard'
+import { PerformanceMetrics } from './PerformanceMetrics'
 
 function parsePredictedPrice(predictedPrice: string): number | null {
   if (!predictedPrice || predictedPrice === 'N/A USD' || predictedPrice.includes('N/A')) {
@@ -30,6 +32,8 @@ interface SymbolStats {
 }
 
 export function AnalyticsDashboard() {
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'leaderboard' | 'metrics'>('overview')
+  
   const symbolsQuery = useQuery({
     queryKey: ['symbols'],
     queryFn: async () => {
@@ -140,8 +144,66 @@ export function AnalyticsDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Overall Stats */}
-      {overallStats && (
+      {/* Sub-tabs */}
+      <div className="bg-card/80 backdrop-blur-sm border border-card-border/60 rounded-2xl p-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveSubTab('overview')}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+              activeSubTab === 'overview'
+                ? "bg-accent text-black"
+                : "text-muted hover:text-foreground hover:bg-card/50"
+            )}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <BarChart3 className="h-4 w-4" />
+              Overview
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('leaderboard')}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+              activeSubTab === 'leaderboard'
+                ? "bg-accent text-black"
+                : "text-muted hover:text-foreground hover:bg-card/50"
+            )}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <Trophy className="h-4 w-4" />
+              Leaderboard
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('metrics')}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+              activeSubTab === 'metrics'
+                ? "bg-accent text-black"
+                : "text-muted hover:text-foreground hover:bg-card/50"
+            )}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <Activity className="h-4 w-4" />
+              Performance
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {activeSubTab === 'leaderboard' && (
+        <AccuracyLeaderboard />
+      )}
+
+      {activeSubTab === 'metrics' && (
+        <PerformanceMetrics />
+      )}
+
+      {activeSubTab === 'overview' && (
+        <>
+          {/* Overall Stats */}
+          {overallStats && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -257,6 +319,8 @@ export function AnalyticsDashboard() {
           ))}
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }
