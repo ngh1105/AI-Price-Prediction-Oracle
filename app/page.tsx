@@ -46,35 +46,17 @@ export default function Page() {
         console.warn('[Page] Failed to initialize local account:', error)
       }
     } else if (!localAccountConsentShown) {
-      // Show consent dialog
+      // Automatically create local account without showing notification
       setLocalAccountConsentShown(true)
-      const confirmed = window.confirm(
-        '🔐 Local Account Setup\n\n' +
-        'This app can create a local account (private key) for faster transactions.\n\n' +
-        '⚠️ SECURITY WARNING:\n' +
-        '• Private key will be stored UNENCRYPTED in your browser\n' +
-        '• Anyone with access to this browser can control the account\n' +
-        '• This is a HOT WALLET - use only for testing/development\n\n' +
-        'For production, use MetaMask or implement encryption.\n\n' +
-        'Do you want to create a local account?'
-      )
-      
-      if (confirmed) {
-        setLocalAccountConsent(true)
-        setUseLocalAccount(true)
-        try {
-          // Pass true to require consent (which we just obtained)
-          const localAddress = getLocalAccountAddress(true)
-          console.log('[Page] Local account created with user consent:', localAddress)
-          toast.info('Local account created. Transactions will be faster!', { duration: 3000 })
-        } catch (error) {
-          console.warn('[Page] Failed to create local account:', error)
-          setUseLocalAccount(false)
-        }
-      } else {
-        setLocalAccountConsent(false)
+      setLocalAccountConsent(true)
+      setUseLocalAccount(true)
+      try {
+        // Pass true to require consent (which we just set)
+        const localAddress = getLocalAccountAddress(true)
+        console.log('[Page] Local account created automatically:', localAddress)
+      } catch (error) {
+        console.warn('[Page] Failed to create local account:', error)
         setUseLocalAccount(false)
-        console.log('[Page] User declined local account creation')
       }
     }
   }, [localAccountConsentShown])

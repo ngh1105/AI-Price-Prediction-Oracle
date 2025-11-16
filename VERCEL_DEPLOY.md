@@ -31,6 +31,8 @@ NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
 NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=your_wallet_connect_project_id
 ```
 
+⚠️ **Lưu ý**: Tên biến phải chính xác là `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` (không phải `NEXT_PUBLIC_WALLET_CONNECT_PF` hay tên khác)
+
 #### Cách thêm:
 
 1. Click "Add" trong phần Environment Variables
